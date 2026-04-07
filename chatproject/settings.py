@@ -52,11 +52,7 @@ MIDDLEWARE = [
 ]
 
 # Add WhiteNoise middleware if available (for production)
-try:
-    import whitenoise
-    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
-except ImportError:
-    pass
+
 
 ROOT_URLCONF = 'chatproject.urls'
 
