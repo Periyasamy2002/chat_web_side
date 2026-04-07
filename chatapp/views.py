@@ -4,6 +4,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib import messages
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+import json
 
 def register(request):
     if request.user.is_authenticated:
@@ -80,8 +83,13 @@ def group(request, code):
 
     if request.method == "POST":
         content = request.POST.get("message")
-        if content.strip():
-            Message.objects.create(user=request.user, group=group, content=content)
+        if content and content.strip():
+            Message.objects.create(
+                user=request.user, 
+                group=group, 
+                content=content,
+                message_type='text'
+            )
         return redirect('group', code=code)
 
     users = messages_list.values_list('user__username', flat=True).distinct()
@@ -91,3 +99,46 @@ def group(request, code):
         "messages": messages_list,
         "users": users
     })
+
+@login_required(login_url='register')
+@require_http_methods(["POST"])
+def upload_voice_message(request, code):
+    """Handle voice message uploads"""
+    try:
+        group = Group.objects.get(code=code)
+        
+        if 'audio' not in request.FILES:
+            print("Error: No audio file in request")
+            return JsonResponse({'error': 'No audio file provided'}, status=400)
+        
+        audio_file = request.FILES['audio']
+        duration = float(request.POST.get('duration', 0))
+        
+        print(f"Received audio file: {audio_file.name}, size: {audio_file.size} bytes, duration: {duration}s")
+        
+        # Validate file size (max 50MB)
+        if audio_file.size > 50 * 1024 * 1024:
+            return JsonResponse({'error': 'Audio file too large (max 50MB)'}, status=400)
+        
+        # Create voice message
+        message = Message.objects.create(
+            user=request.user,
+            group=group,
+            audio_file=audio_file,
+            message_type='voice',
+            duration=max(duration, 1)  # Ensure minimum 1 second
+        )
+        
+        print(f"Voice message created successfully with ID: {message.id}")
+        
+        return JsonResponse({
+            'success': True,
+            'message_id': message.id,
+            'audio_url': message.audio_file.url
+        })
+    except Group.DoesNotExist:
+        print(f"Error: Group with code {code} not found")
+        return JsonResponse({'error': 'Group not found'}, status=404)
+    except Exception as e:
+        print(f"Error in upload_voice_message: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=400)

@@ -3,11 +3,18 @@
 {% block content %}
 
 <style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
     .chat-page {
         height: calc(100vh - 120px);
         display: flex;
         flex-direction: column;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        overflow: hidden;
     }
 
     .chat-header {
@@ -125,10 +132,15 @@
         border-bottom-left-radius: 4px;
     }
 
-    .message-bubble b {
-        display: block;
-        font-size: 0.85rem;
+    .message-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
         margin-bottom: 0.3rem;
+    }
+
+    .message-bubble b {
+        font-size: 0.85rem;
         opacity: 0.9;
     }
 
@@ -138,6 +150,10 @@
 
     .message-bubble.receiver b {
         color: #667eea;
+    }
+
+    .message-content {
+        margin: 0.3rem 0;
     }
 
     .message-time {
@@ -155,6 +171,110 @@
         color: #999;
     }
 
+    /* VOICE MESSAGE STYLES */
+    .voice-message {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0;
+    }
+
+    .voice-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .play-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255, 255, 255, 0.3);
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.2s ease;
+    }
+
+    .message-bubble.sender .play-btn {
+        background: rgba(255, 255, 255, 0.3);
+        color: white;
+    }
+
+    .message-bubble.receiver .play-btn {
+        background: rgba(102, 126, 234, 0.2);
+        color: #667eea;
+    }
+
+    .play-btn:hover {
+        background: rgba(255, 255, 255, 0.5);
+        transform: scale(1.1);
+    }
+
+    .play-btn:active {
+        transform: scale(0.95);
+    }
+
+    .voice-progress {
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .message-bubble.receiver .progress-bar {
+        background: rgba(102, 126, 234, 0.1);
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        border-radius: 2px;
+        width: 0%;
+        transition: width 0.1s linear;
+    }
+
+    .message-bubble.receiver .progress-fill {
+        background: #667eea;
+    }
+
+    .voice-duration {
+        font-size: 0.75rem;
+        min-width: 35px;
+        text-align: right;
+    }
+
+    .message-bubble.sender .voice-duration {
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .message-bubble.receiver .voice-duration {
+        color: #999;
+    }
+
+    .empty-state {
+        text-align: center;
+        color: white;
+        padding: 2rem;
+    }
+
+    .empty-state p {
+        font-size: 1.2rem;
+        opacity: 0.8;
+    }
+
+    /* INPUT AREA STYLES */
     .input-area {
         background: rgba(255, 255, 255, 0.1);
         padding: 1rem 2rem;
@@ -176,12 +296,17 @@
 
     .input-form {
         display: flex;
-        gap: 1rem;
-        align-items: center;
+        gap: 0.75rem;
+        align-items: flex-end;
+    }
+
+    .input-wrapper {
+        flex: 1;
+        position: relative;
     }
 
     .input-form input {
-        flex: 1;
+        width: 100%;
         padding: 0.75rem 1rem;
         border: 2px solid rgba(255, 255, 255, 0.3);
         border-radius: 25px;
@@ -202,8 +327,8 @@
         box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
     }
 
-    .send-btn {
-        padding: 0.75rem 1.5rem;
+    .send-btn, .mic-btn {
+        padding: 0.75rem 1rem;
         background: linear-gradient(90deg, #4CAF50, #45a049);
         color: white;
         border: none;
@@ -213,10 +338,14 @@
         transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
-        min-width: 60px;
+        min-width: 50px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
     }
 
-    .send-btn::before {
+    .send-btn::before, .mic-btn::before {
         content: '';
         position: absolute;
         top: 0;
@@ -228,28 +357,57 @@
         transition: left 0.3s ease;
     }
 
-    .send-btn:hover::before {
+    .send-btn:hover::before, .mic-btn:hover::before {
         left: 0;
     }
 
-    .send-btn:hover {
+    .send-btn:hover, .mic-btn:hover {
         transform: scale(1.05);
         box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
     }
 
-    .send-btn:active {
+    .send-btn:active, .mic-btn:active {
         transform: scale(0.98);
     }
 
-    .empty-state {
-        text-align: center;
-        color: white;
-        padding: 2rem;
+    .mic-btn.recording {
+        background: linear-gradient(90deg, #F44336, #D32F2F);
+        animation: micPulse 1s ease-in-out infinite;
     }
 
-    .empty-state p {
-        font-size: 1.2rem;
-        opacity: 0.8;
+    @keyframes micPulse {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7);
+        }
+        50% {
+            box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+        }
+    }
+
+    .recording-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: white;
+        font-size: 0.9rem;
+        margin-left: 1rem;
+    }
+
+    .recording-dot {
+        width: 8px;
+        height: 8px;
+        background: #F44336;
+        border-radius: 50%;
+        animation: blink 1s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.3;
+        }
     }
 
     @media (max-width: 768px) {
@@ -262,11 +420,25 @@
         }
 
         .input-area {
-            padding: 1rem 1.5rem;
+            padding: 0.75rem 1rem;
         }
 
         .messages-scroll {
             padding: 1rem 1.5rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1.2rem;
+        }
+
+        .input-form {
+            gap: 0.5rem;
+        }
+
+        .send-btn, .mic-btn {
+            padding: 0.6rem 0.8rem;
+            min-width: 45px;
+            font-size: 1rem;
         }
     }
 </style>
@@ -276,7 +448,7 @@
     <div class="chat-header">
         <h2>
             💬 {{ group.name }}
-            <span class="users-badge">👥 {{ users|length }} Members</span>
+            <!-- <span class="users-badge">👥 {{ users|length }} Members</span> -->
         </h2>
     </div>
 
@@ -285,12 +457,42 @@
         {% if messages %}
             {% for msg in messages %}
                 <div class="message-group {% if msg.user == user %}sender{% else %}receiver{% endif %}">
-                    <div class="message-bubble {% if msg.user == user %}sender{% else %}receiver{% endif %}">
-                        {% if msg.user != user %}<b>{{ msg.user.first_name|default:msg.user.username }}</b>{% endif %}
-                        {{ msg.content }}
-                        <span class="message-time">
-                            {{ msg.timestamp|date:"H:i" }}
-                        </span>
+                    <div class="message-bubble {% if msg.user == user %}sender{% else %}receiver{% endif %}" data-message-id="{{ msg.id }}">
+                        {% if msg.user != user %}
+                            <div class="message-header">
+                                <b>{{ msg.user.first_name|default:msg.user.username }}</b>
+                            </div>
+                        {% endif %}
+
+                        <!-- TEXT MESSAGE -->
+                        {% if msg.message_type == 'text' %}
+                            <div class="message-content">{{ msg.content }}</div>
+                        
+                        <!-- VOICE MESSAGE -->
+                        {% elif msg.message_type == 'voice' %}
+                            <div class="voice-message">
+                                <div class="voice-controls">
+                                    <button class="play-btn" onclick="togglePlayPause(event, this)">▶️</button>
+                                </div>
+                                <div class="voice-progress">
+                                    <div class="progress-bar" onclick="seekAudio(event, this)">
+                                        <div class="progress-fill"></div>
+                                    </div>
+                                </div>
+                                <div class="voice-duration">
+                                    {% if msg.duration %}
+                                        <span class="duration-text">{{ msg.duration|floatformat:0 }}s</span>
+                                    {% else %}
+                                        <span class="duration-text">0s</span>
+                                    {% endif %}
+                                </div>
+                                <audio style="display: none;" data-duration="{{ msg.duration }}">
+                                    <source src="{{ msg.audio_file.url }}" type="audio/webm">
+                                </audio>
+                            </div>
+                        {% endif %}
+
+                        <span class="message-time">{{ msg.timestamp|date:"H:i" }}</span>
                     </div>
                 </div>
             {% endfor %}
@@ -305,29 +507,320 @@
     <div class="input-area">
         <form method="POST" class="input-form" id="messageForm">
             {% csrf_token %}
-            <input type="text" name="message" id="messageInput" placeholder="Type your message..." autocomplete="off">
-            <button type="submit" class="send-btn">✈️</button>
+            <div class="input-wrapper">
+                <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
+            </div>
+            <button type="submit" class="send-btn" id="sendBtn">✈️</button>
+            <button type="button" class="mic-btn" id="micBtn" title="Press and hold to record">🎤</button>
         </form>
+        <div class="recording-indicator" id="recordingIndicator" style="display: none;">
+            <div class="recording-dot"></div>
+            <span>Recording...</span>
+        </div>
     </div>
 </div>
 
 <script>
-    // Auto-scroll to bottom
+    // === AUTO-SCROLL ===
     function scrollToBottom() {
         const messagesScroll = document.getElementById('messagesScroll');
         messagesScroll.scrollTop = messagesScroll.scrollHeight;
     }
 
-    // Scroll to bottom on load
     window.addEventListener('load', scrollToBottom);
-
-    // Focus input on load
     document.getElementById('messageInput').focus();
 
-    // Auto-clear input and scroll after submit
-    document.getElementById('messageForm').addEventListener('submit', function() {
+    document.getElementById('messageForm').addEventListener('submit', function(e) {
         setTimeout(scrollToBottom, 100);
     });
+
+    // === VOICE RECORDING ===
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let recordingStartTime;
+    let isInitializing = false;
+
+    const micBtn = document.getElementById('micBtn');
+    const recordingIndicator = document.getElementById('recordingIndicator');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const groupCode = '{{ group.code }}';
+
+    // Request microphone permission and initialize MediaRecorder
+    async function initializeAudio() {
+        if (isInitializing) return;
+        isInitializing = true;
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Use supported MIME type
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+                ? 'audio/webm;codecs=opus' 
+                : 'audio/webm';
+            
+            mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                if (audioChunks.length > 0) {
+                    const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    sendVoiceMessage(audioBlob);
+                    audioChunks = [];
+                } else {
+                    console.warn('No audio data recorded');
+                }
+            };
+
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                alert('Error recording audio: ' + event.error);
+            };
+
+            console.log('Audio initialized with MIME type:', mediaRecorder.mimeType);
+            isInitializing = false;
+        } catch (error) {
+            console.error('Microphone error:', error);
+            alert('Microphone access denied. Please enable microphone permissions.');
+            isInitializing = false;
+        }
+    }
+
+    // Start recording on mouse down
+    micBtn.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        
+        // Initialize if not already done
+        if (!mediaRecorder) {
+            await initializeAudio();
+            // Return here, wait for next click
+            return;
+        }
+
+        // If stream is dead, reinitialize
+        if (!mediaRecorder.stream.active) {
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            mediaRecorder = null;
+            await initializeAudio();
+            return;
+        }
+
+        // Start recording
+        if (!isRecording) {
+            try {
+                audioChunks = [];
+                isRecording = true;
+                recordingStartTime = Date.now();
+                mediaRecorder.start();
+                
+                micBtn.classList.add('recording');
+                recordingIndicator.style.display = 'flex';
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                
+                console.log('Recording started');
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+            }
+        }
+    });
+
+    // Stop recording on mouse up
+    document.addEventListener('mouseup', () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+            try {
+                isRecording = false;
+                mediaRecorder.stop();
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                
+                console.log('Recording stopped');
+            } catch (error) {
+                console.error('Error stopping recording:', error);
+            }
+        }
+    });
+
+    // Touch events for mobile
+    micBtn.addEventListener('touchstart', async (e) => {
+        e.preventDefault();
+        
+        if (!mediaRecorder) {
+            await initializeAudio();
+            return;
+        }
+
+        if (!mediaRecorder.stream.active) {
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            mediaRecorder = null;
+            await initializeAudio();
+            return;
+        }
+
+        if (!isRecording) {
+            try {
+                audioChunks = [];
+                isRecording = true;
+                recordingStartTime = Date.now();
+                mediaRecorder.start();
+                
+                micBtn.classList.add('recording');
+                recordingIndicator.style.display = 'flex';
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                
+                console.log('Touch recording started');
+            } catch (error) {
+                console.error('Error starting touch recording:', error);
+                isRecording = false;
+            }
+        }
+    });
+
+    document.addEventListener('touchend', () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+            try {
+                isRecording = false;
+                mediaRecorder.stop();
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                
+                console.log('Touch recording stopped');
+            } catch (error) {
+                console.error('Error stopping touch recording:', error);
+            }
+        }
+    });
+
+    // Send voice message
+    async function sendVoiceMessage(audioBlob) {
+        const duration = (Date.now() - recordingStartTime) / 1000;
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'voice_message.webm');
+        formData.append('duration', duration.toFixed(2));
+
+        try {
+            console.log('Sending voice message, duration:', duration);
+            const response = await fetch(`/group/${groupCode}/upload-voice/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('Voice message sent successfully:', result);
+                location.reload();
+            } else {
+                const error = await response.json();
+                console.error('Server error:', error);
+                alert('Failed to send voice message: ' + error.error);
+            }
+        } catch (error) {
+            console.error('Error sending voice message:', error);
+            alert('Error sending voice message: ' + error.message);
+        }
+    }
+
+    // === AUDIO PLAYBACK ===
+    let currentAudio = null;
+    const audioPlaybackHandlers = new Map();
+
+    function togglePlayPause(event, button) {
+        event.preventDefault();
+
+        const messageBubble = button.closest('.message-bubble');
+        const audio = messageBubble.querySelector('audio');
+
+        if (!audio) {
+            console.error('No audio element found');
+            return;
+        }
+
+        // Stop other playing audios
+        if (currentAudio && currentAudio !== audio) {
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
+            const otherBtn = currentAudio.closest('.message-bubble')?.querySelector('.play-btn');
+            if (otherBtn) otherBtn.textContent = '▶️';
+        }
+
+        if (audio.paused) {
+            audio.play().catch(err => console.error('Playback error:', err));
+            button.textContent = '⏸️';
+            currentAudio = audio;
+
+            // Remove previous event listeners
+            if (audioPlaybackHandlers.has(audio)) {
+                const handlers = audioPlaybackHandlers.get(audio);
+                audio.removeEventListener('timeupdate', handlers.timeupdate);
+                audio.removeEventListener('ended', handlers.ended);
+            }
+
+            // Add new event listeners
+            const timeUpdateHandler = function() { updateProgressBar.call(this); };
+            const endedHandler = function() {
+                button.textContent = '▶️';
+                updateProgressBar.call(this);
+            };
+
+            audio.addEventListener('timeupdate', timeUpdateHandler);
+            audio.addEventListener('ended', endedHandler);
+
+            audioPlaybackHandlers.set(audio, {
+                timeupdate: timeUpdateHandler,
+                ended: endedHandler
+            });
+        } else {
+            audio.pause();
+            button.textContent = '▶️';
+        }
+    }
+
+    function updateProgressBar() {
+        const messageBubble = this.closest('.message-bubble');
+        if (!messageBubble) return;
+
+        const progressFill = messageBubble.querySelector('.progress-fill');
+        const durationText = messageBubble.querySelector('.duration-text');
+
+        if (this.duration && !isNaN(this.duration)) {
+            const progress = (this.currentTime / this.duration) * 100;
+            progressFill.style.width = progress + '%';
+
+            const remaining = this.duration - this.currentTime;
+            durationText.textContent = Math.ceil(remaining) + 's';
+        }
+    }
+
+    function seekAudio(event, progressBar) {
+        const messageBubble = progressBar.closest('.message-bubble');
+        const audio = messageBubble.querySelector('audio');
+
+        if (audio && !isNaN(audio.duration)) {
+            const rect = progressBar.getBoundingClientRect();
+            const percent = (event.clientX - rect.left) / rect.width;
+            audio.currentTime = percent * audio.duration;
+            updateProgressBar.call(audio);
+        }
+    }
 </script>
 
 {% endblock %}
