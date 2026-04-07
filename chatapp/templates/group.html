@@ -754,40 +754,13 @@
         <div class="header-top">
             <div>
                 <h2>
-                    💬 {{ group.name }}
+                    💬 {{ group.code }}
                 </h2>
-            </div>
-            <div class="participants-dropdown">
-                <button class="participants-btn" id="participantsBtn">👥 {{ all_users.count }} Members</button>
-                <div class="participants-list" id="participantsList">
-                    {% for user in all_users %}
-                        <div class="participant-item">
-                            <div class="participant-avatar">
-                                {{ user.first_name|first|default:user.username|first|upper }}
-                                <div class="participant-status {% if user.id not in online_user_ids %}offline{% endif %}"></div>
-                            </div>
-                            <div class="participant-info">
-                                <div class="participant-name">
-                                    {{ user.first_name|default:user.username }}
-                                    {% if user.id == current_user.id %}
-                                        <span class="you-badge">You</span>
-                                    {% endif %}
-                                </div>
-                                <div class="participant-status-text">
-                                    {% if user.id in online_user_ids %}
-                                        <span style="color: #4CAF50;">● Online</span>
-                                    {% else %}
-                                        <span style="color: #999;">● Offline</span>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
             </div>
         </div>
         <div class="header-info">
-            <span><span class="online-indicator"></span> {{ online_count }} Online</span>
+            <span>Your Name: <strong>{{ user_name }}</strong></span>
+            <span style="margin-left: 1rem;"><span class="online-indicator"></span> {{ online_count }} Online</span>
         </div>
     </div>
 
@@ -795,14 +768,14 @@
     <div class="messages-scroll" id="messagesScroll">
         {% if messages %}
             {% for msg in messages %}
-                <div class="message-group {% if msg.user == current_user %}sender{% else %}receiver{% endif %}">
-                    <div class="message-bubble {% if msg.user == current_user %}sender{% else %}receiver{% endif %} {% if msg.is_deleted != 'not_deleted' %}deleted{% endif %}" 
+                <div class="message-group {% if msg.session_id == request.session.session_key %}sender{% else %}receiver{% endif %}">
+                    <div class="message-bubble {% if msg.session_id == request.session.session_key %}sender{% else %}receiver{% endif %} {% if msg.is_deleted != 'not_deleted' %}deleted{% endif %}" 
                          data-message-id="{{ msg.id }}" 
-                         data-is-sender="{% if msg.user == current_user %}true{% else %}false{% endif %}">
+                         data-is-sender="{% if msg.session_id == request.session.session_key %}true{% else %}false{% endif %}">
                             
-                            {% if msg.user != current_user %}
+                            {% if msg.session_id != request.session.session_key %}
                                 <div class="message-header">
-                                    <b>{{ msg.user.first_name|default:msg.user.username }}</b>
+                                    <b>{{ msg.user_name }}</b>
                                 </div>
                             {% endif %}
 
@@ -916,18 +889,6 @@
     const groupCode = '{{ group.code }}';
     let selectedMessage = null;
     let longPressTimer = null;
-
-    // === PARTICIPANTS DROPDOWN ===
-    document.getElementById('participantsBtn').addEventListener('click', function() {
-        const participantsList = document.getElementById('participantsList');
-        participantsList.classList.toggle('active');
-    });
-
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.participants-dropdown')) {
-            document.getElementById('participantsList').classList.remove('active');
-        }
-    });
 
     // === CONTEXT MENU & MESSAGE ACTIONS ===
     document.addEventListener('contextmenu', function(e) {

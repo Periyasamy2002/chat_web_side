@@ -230,15 +230,21 @@
 <div class="chat-container">
     <div class="chat-header">
         <h2>💬 Join a Group Chat</h2>
-        <p>Create a new group or join an existing one</p>
+        <p>Enter your name and a group code to start chatting</p>
     </div>
+
+    {% if error %}
+        <div style="background: rgba(244, 67, 54, 0.2); border-left: 4px solid #f44336; padding: 1rem; border-radius: 8px; color: #ffcdd2; margin-bottom: 1.5rem;">
+            {{ error }}
+        </div>
+    {% endif %}
 
     <form method="POST">
         {% csrf_token %}
         
         <div class="form-group">
-            <label for="name">Group Name</label>
-            <input type="text" id="name" name="name" placeholder="e.g., Friends Chat, Work Team" required>
+            <label for="user_name">Your Name</label>
+            <input type="text" id="user_name" name="user_name" placeholder="e.g., John, Alice" required>
         </div>
 
         <div class="form-group">
@@ -253,7 +259,7 @@
     </form>
 
     <div class="info-box">
-        <strong>💡 Tip:</strong> Share the same group code with friends to join the same chat room!
+        <strong>💡 Tip:</strong> Share the same group code with friends to join the same chat room! Your name will be used as your display name in the chat.
     </div>
 </div>
 
