@@ -59,19 +59,6 @@ def group(request, code):
     # Get all messages
     messages_list = Message.objects.filter(group=group).order_by('timestamp')
     
-    # Handle text message posting
-    if request.method == "POST":
-        content = request.POST.get("message")
-        if content and content.strip():
-            Message.objects.create(
-                group=group, 
-                content=content,
-                message_type='text',
-                user_name=user_name,
-                session_id=session_id
-            )
-        return redirect('group', code=code)
-    
     # Get online users in this group
     online_users = AnonymousUser.objects.filter(
         last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)

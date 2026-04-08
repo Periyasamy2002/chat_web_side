@@ -781,7 +781,6 @@
         }
     }
 
-    /* ========== ADDITIONAL MOBILE MEDIA QUERIES ========== */
     @media (max-width: 480px) {
         .chat-page {
             position: fixed;
@@ -790,11 +789,15 @@
             left: 0;
             right: 0;
             bottom: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         .chat-header {
             padding: 0.6rem 0.8rem;
             min-height: 55px;
+            flex-shrink: 0;
         }
 
         .header-top {
@@ -823,9 +826,12 @@
         }
 
         .messages-scroll {
+            flex: 1;
             padding: 0.6rem 0.6rem;
             gap: 0.5rem;
             -webkit-overflow-scrolling: touch;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .message-bubble {
@@ -855,6 +861,8 @@
             width: 30px;
             height: 30px;
             font-size: 0.95rem;
+            min-width: 30px;
+            min-height: 30px;
         }
 
         .voice-duration {
@@ -863,27 +871,46 @@
         }
 
         .input-area {
-            padding: 0.55rem 0.6rem;
-            min-height: 50px;
+            padding: 0.5rem 0.6rem;
+            min-height: 48px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: flex-end;
+            gap: 0.4rem;
         }
 
         .input-form {
+            width: 100%;
+            display: flex;
             gap: 0.35rem;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            min-width: 0;
         }
 
         .input-form input {
+            width: 100%;
             padding: 0.5rem 0.7rem;
             font-size: 0.9rem;
             border-radius: 18px;
             min-height: 36px;
+            box-sizing: border-box;
         }
 
         .send-btn, .mic-btn {
             padding: 0.5rem 0.6rem;
-            min-width: 40px;
-            min-height: 36px;
+            min-width: 44px;
+            min-height: 44px;
             font-size: 1rem;
             border-radius: 18px;
+            flex-shrink: 0;
+            cursor: pointer;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         .recording-indicator {
@@ -1141,12 +1168,12 @@
 
     <!-- INPUT AREA -->
     <div class="input-area">
-        <form method="POST" class="input-form" id="messageForm">
+        <form class="input-form" id="messageForm" onsubmit="return false;">
             {% csrf_token %}
             <div class="input-wrapper">
                 <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
             </div>
-            <button type="submit" class="send-btn" id="sendBtn">✈️</button>
+            <button type="button" class="send-btn" id="sendBtn">✈️</button>
             <button type="button" class="mic-btn" id="micBtn" title="Press and hold to record">🎤</button>
         </form>
         <div class="recording-indicator" id="recordingIndicator" style="display: none;">
@@ -1191,15 +1218,39 @@
     // === AUTO-SCROLL ===
     function scrollToBottom() {
         const messagesScroll = document.getElementById('messagesScroll');
-        messagesScroll.scrollTop = messagesScroll.scrollHeight;
+        if (messagesScroll) {
+            setTimeout(() => {
+                messagesScroll.scrollTop = messagesScroll.scrollHeight;
+            }, 0);
+        }
+    }
+
+    // === MOBILE VIEWPORT HANDLING ===
+    let isMobileViewport = window.innerWidth <= 480;
+    
+    function handleMobileViewport() {
+        isMobileViewport = window.innerWidth <= 480;
+        if (isMobileViewport) {
+            // Ensure messages scroll to bottom on mobile
+            scrollToBottom();
+        }
     }
 
     window.addEventListener('load', scrollToBottom);
-    document.getElementById('messageInput').focus();
-
-    document.getElementById('messageForm').addEventListener('submit', function(e) {
-        e.preventDefault();
+    window.addEventListener('resize', handleMobileViewport);
+    window.addEventListener('orientationchange', function() {
         setTimeout(scrollToBottom, 100);
+    });
+    
+    // Focus input when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            // Delay focus to ensure DOM is fully ready on mobile
+            setTimeout(() => {
+                messageInput.focus();
+            }, 100);
+        }
     });
 
     const groupCode = '{{ group.code }}';
@@ -1719,25 +1770,39 @@
         }
     }
 
-    // Update message form to use AJAX
-    const messageForm = document.getElementById('messageForm');
-    let isSubmittingMessage = false; // Prevent double submission
+    // Message submission handler function
+    let isSubmittingMessage = false;
     
-    messageForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-
+    function sendMessage() {
         // Prevent double submission
         if (isSubmittingMessage) {
+            console.warn('Message submission already in progress');
             return;
         }
 
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
+        
+        if (!messageInput) {
+            console.error('Message input not found');
+            alert('Error: Unable to find message input');
+            return;
+        }
+        
+        if (!sendBtn) {
+            console.error('Send button not found');
+            alert('Error: Unable to find send button');
+            return;
+        }
+        
         const message = messageInput.value.trim();
 
         if (!message) {
+            console.debug('Empty message, not sending');
             return;
         }
+
+        console.log('Sending message:', message);
 
         // Disable submit button during submission
         isSubmittingMessage = true;
@@ -1746,16 +1811,32 @@
 
         const formData = new FormData();
         formData.append('message', message);
+        
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (!csrfToken) {
+            console.error('CSRF token not found');
+            alert('Error: CSRF token missing');
+            isSubmittingMessage = false;
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
+            return;
+        }
 
         fetch(`/group/${groupCode}/send-message/`, {
             method: 'POST',
             body: formData,
             headers: {
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                'X-CSRFToken': csrfToken.value
             }
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log('Send response:', data);
             if (data.success) {
                 messageInput.value = '';
                 messageInput.focus();
@@ -1764,12 +1845,14 @@
                 // Scroll to bottom after a brief delay
                 setTimeout(scrollToBottom, 100);
             } else {
-                alert('Error sending message: ' + (data.error || 'Unknown error'));
+                const errorMsg = data.error || 'Unknown error';
+                console.error('Send error:', errorMsg);
+                alert('Error sending message: ' + errorMsg);
             }
         })
         .catch(error => {
-            console.error('Error:', error);
-            alert('Error sending message');
+            console.error('Fetch error:', error);
+            alert('Error sending message: ' + error.message);
         })
         .finally(() => {
             // Re-enable submit button
@@ -1777,7 +1860,82 @@
             sendBtn.disabled = false;
             sendBtn.style.opacity = '1';
         });
-    });
+    }
+
+    // Initialize event listeners when DOM is ready
+    function initializeEventListeners() {
+        console.log('Initializing event listeners...');
+        
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const messagesScroll = document.getElementById('messagesScroll');
+        
+        if (!sendBtn) {
+            console.error('❌ Send button not found');
+        } else {
+            console.log('✓ Send button found');
+        }
+        
+        if (!messageInput) {
+            console.error('❌ Message input not found');
+        } else {
+            console.log('✓ Message input found');
+        }
+        
+        if (!messagesScroll) {
+            console.error('❌ Messages scroll container not found');
+        } else {
+            console.log('✓ Messages scroll container found');
+        }
+        
+        if (!sendBtn || !messageInput) {
+            console.error('Cannot initialize: required elements not found');
+            return;
+        }
+        
+        // Send message on button click
+        sendBtn.addEventListener('click', function(e) {
+            console.log('Send button clicked');
+            e.preventDefault();
+            e.stopPropagation();
+            sendMessage();
+        });
+
+        // Send message on Enter key press in input
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                console.log('Enter key pressed in message input');
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        // Mobile touch support for button
+        if ('ontouchstart' in window) {
+            console.log('Touch support detected, adding touchend listener');
+            sendBtn.addEventListener('touchend', function(e) {
+                console.log('Send button touched');
+                e.preventDefault();
+                e.stopPropagation();
+                sendMessage();
+            });
+        }
+        
+        console.log('Event listeners initialized successfully');
+    }
+
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        console.log('DOM still loading, waiting for DOMContentLoaded event');
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOMContentLoaded event fired');
+            initializeEventListeners();
+        });
+    } else {
+        // DOM is already loaded
+        console.log('DOM already loaded, initializing immediately');
+        initializeEventListeners();
+    }
 
     // Start polling when page loads
     window.addEventListener('load', function() {
