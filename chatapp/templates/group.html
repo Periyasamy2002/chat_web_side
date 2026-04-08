@@ -1742,6 +1742,7 @@
 
     // === AUDIO PLAYBACK ===
     let currentAudio = null;
+    let isAudioPlaying = false; // Track if play() is in progress
     const audioPlaybackHandlers = new Map();
 
     function togglePlayPause(event, button) {
@@ -1756,35 +1757,57 @@
             return;
         }
 
-        if (currentAudio && currentAudio !== audio) {
-            currentAudio.pause();
-            currentAudio.currentTime = 0;
+        // Stop previous audio if playing a different one
+        if (currentAudio && currentAudio !== audio && !currentAudio.paused) {
+            try {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            } catch (e) {
+                console.warn('Error stopping previous audio:', e);
+            }
             const otherBtn = currentAudio.closest('.message-bubble')?.querySelector('.play-btn');
             if (otherBtn) otherBtn.textContent = '▶️';
         }
 
+        // Play audio
         if (audio.paused) {
+            // Prevent race condition - don't play if already trying to play
+            if (isAudioPlaying) {
+                console.warn('Play already in progress, ignoring request');
+                return;
+            }
+
             console.log('Starting playback...');
             console.log('Audio source:', audio.querySelector('source')?.src);
             console.log('Audio MIME type:', audio.querySelector('source')?.type);
             
+            isAudioPlaying = true;
+
             audio.play()
                 .then(() => {
                     console.log('✓ Audio playback started successfully');
                     button.textContent = '⏸️';
                     currentAudio = audio;
+                    isAudioPlaying = false;
 
+                    // Remove old event listeners if they exist
                     if (audioPlaybackHandlers.has(audio)) {
                         const handlers = audioPlaybackHandlers.get(audio);
-                        audio.removeEventListener('timeupdate', handlers.timeupdate);
-                        audio.removeEventListener('ended', handlers.ended);
-                        audio.removeEventListener('error', handlers.error);
+                        try {
+                            audio.removeEventListener('timeupdate', handlers.timeupdate);
+                            audio.removeEventListener('ended', handlers.ended);
+                            audio.removeEventListener('error', handlers.error);
+                        } catch (e) {
+                            console.warn('Error removing old listeners:', e);
+                        }
                     }
 
+                    // Add new event listeners
                     const timeUpdateHandler = function() { updateProgressBar.call(this); };
                     const endedHandler = function() {
                         button.textContent = '▶️';
                         updateProgressBar.call(this);
+                        isAudioPlaying = false;
                         console.log('✓ Audio playback finished');
                     };
                     const errorHandler = function(e) {
@@ -1796,6 +1819,7 @@
                             type: audio.querySelector('source')?.type
                         });
                         button.textContent = '▶️';
+                        isAudioPlaying = false;
                         alert('Error playing audio: ' + (e.target.error?.message || 'Unknown error. Try refreshing the page.'));
                     };
 
@@ -1810,6 +1834,14 @@
                     });
                 })
                 .catch(err => {
+                    isAudioPlaying = false;
+                    
+                    // Ignore "interrupted" errors - these happen when pause() is called during play()
+                    if (err.name === 'NotAllowedError' && err.message.includes('interrupted')) {
+                        console.log('Play request interrupted (expected behavior):', err.message);
+                        return;
+                    }
+
                     console.error('Playback error:', err);
                     console.error('Error details:', {
                         name: err.name,
@@ -1818,11 +1850,21 @@
                         type: audio.querySelector('source')?.type
                     });
                     button.textContent = '▶️';
-                    alert('Error playing audio: ' + err.message);
+                    
+                    // Only show alert for actual errors, not interruption
+                    if (err.name !== 'NotAllowedError') {
+                        alert('Error playing audio: ' + err.message);
+                    }
                 });
         } else {
+            // Pause audio
             console.log('Pausing audio...');
-            audio.pause();
+            try {
+                audio.pause();
+                isAudioPlaying = false;
+            } catch (e) {
+                console.error('Error pausing audio:', e);
+            }
             button.textContent = '▶️';
         }
     }
