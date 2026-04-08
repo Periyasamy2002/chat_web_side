@@ -1198,6 +1198,7 @@
     document.getElementById('messageInput').focus();
 
     document.getElementById('messageForm').addEventListener('submit', function(e) {
+        e.preventDefault();
         setTimeout(scrollToBottom, 100);
     });
 
@@ -1720,15 +1721,28 @@
 
     // Update message form to use AJAX
     const messageForm = document.getElementById('messageForm');
+    let isSubmittingMessage = false; // Prevent double submission
+    
     messageForm.addEventListener('submit', function(e) {
         e.preventDefault();
 
+        // Prevent double submission
+        if (isSubmittingMessage) {
+            return;
+        }
+
         const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
         const message = messageInput.value.trim();
 
         if (!message) {
             return;
         }
+
+        // Disable submit button during submission
+        isSubmittingMessage = true;
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.6';
 
         const formData = new FormData();
         formData.append('message', message);
@@ -1747,6 +1761,8 @@
                 messageInput.focus();
                 // Fetch new messages immediately
                 fetchNewMessages();
+                // Scroll to bottom after a brief delay
+                setTimeout(scrollToBottom, 100);
             } else {
                 alert('Error sending message: ' + (data.error || 'Unknown error'));
             }
@@ -1754,6 +1770,12 @@
         .catch(error => {
             console.error('Error:', error);
             alert('Error sending message');
+        })
+        .finally(() => {
+            // Re-enable submit button
+            isSubmittingMessage = false;
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
         });
     });
 
