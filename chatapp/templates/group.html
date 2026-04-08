@@ -1372,76 +1372,194 @@
         }
     });
 
-    // === VOICE RECORDING ===
+    // === VOICE RECORDING (IMPROVED) ===
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
     let recordingStartTime;
     let isInitializing = false;
+    let audioStream = null; // Track stream for cleanup
 
     const micBtn = document.getElementById('micBtn');
     const recordingIndicator = document.getElementById('recordingIndicator');
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
 
-    async function initializeAudio() {
-        if (isInitializing) return;
+    // Check if browser supports MediaRecorder
+    const isMediaRecorderSupported = () => {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    };
+
+    // Check and get supported MIME type
+    function getSupportedMimeType() {
+        const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+            'audio/wav',
+            'audio/aac'
+        ];
+        
+        for (let mimeType of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                console.log('Supported MIME type:', mimeType);
+                return mimeType;
+            }
+        }
+        
+        // Fallback to default if none supported
+        console.warn('No specific MIME type supported, using default');
+        return '';
+    }
+
+    async function initializeAudio(retryCount = 0) {
+        if (isInitializing) {
+            console.debug('Audio initialization already in progress');
+            return;
+        }
+
+        if (!isMediaRecorderSupported()) {
+            console.error('MediaRecorder not supported in this browser');
+            alert('Voice recording is not supported in your browser. Please use Chrome, Firefox, or Edge.');
+            return;
+        }
+
         isInitializing = true;
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.log('Requesting microphone access (attempt ' + (retryCount + 1) + ')');
             
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-                ? 'audio/webm;codecs=opus' 
-                : 'audio/webm';
+            // Request microphone with specific constraints
+            const constraints = {
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 16000 // 16kHz is good for speech
+                }
+            };
             
-            mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+            audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log('✓ Microphone access granted');
+            
+            // Get supported MIME type
+            const mimeType = getSupportedMimeType();
+            const recorderOptions = mimeType ? { mimeType: mimeType } : {};
+            
+            try {
+                mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+                console.log('✓ MediaRecorder created with MIME type:', mimeType || 'default');
+            } catch (error) {
+                console.warn('Failed to create MediaRecorder with options:', error);
+                // Fallback: create without options
+                mediaRecorder = new MediaRecorder(audioStream);
+                console.log('✓ MediaRecorder created with default settings');
+            }
 
             mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
+                if (event.data && event.data.size > 0) {
                     audioChunks.push(event.data);
+                    console.log('Audio data chunk received, size:', event.data.size);
                 }
             };
 
             mediaRecorder.onstop = () => {
+                console.log('MediaRecorder stopped, chunks:', audioChunks.length);
                 if (audioChunks.length > 0) {
-                    const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    console.log('Audio blob created, size:', audioBlob.size);
                     sendVoiceMessage(audioBlob);
                     audioChunks = [];
+                } else {
+                    console.warn('No audio chunks recorded');
+                    alert('No audio recorded. Please try again.');
                 }
             };
 
             mediaRecorder.onerror = (event) => {
                 console.error('MediaRecorder error:', event.error);
                 alert('Error recording audio: ' + event.error);
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
             };
 
-            console.log('Audio initialized with MIME type:', mediaRecorder.mimeType);
+            console.log('✓ Audio initialization successful');
             isInitializing = false;
         } catch (error) {
-            console.error('Microphone error:', error);
-            alert('Microphone access denied. Please enable microphone permissions.');
-            isInitializing = false;
+            console.error('Microphone initialization error:', error.name, error.message);
+            
+            // Provide specific error messages
+            if (error.name === 'NotAllowedError') {
+                alert('Microphone access was denied. Please enable microphone permissions in your browser settings and try again.');
+            } else if (error.name === 'NotFoundError') {
+                alert('No microphone found. Please connect a microphone and try again.');
+            } else if (error.name === 'NotReadableError') {
+                alert('Microphone is being used by another application. Please close other apps using the microphone.');
+            } else if (error.name === 'SecurityError') {
+                alert('HTTPS is required for microphone access. Please use a secure connection.');
+            } else {
+                alert('Microphone access failed: ' + error.message);
+            }
+            
+            // Retry once if it's a recoverable error
+            if (retryCount < 1 && (error.name === 'NotReadableError' || error.name === 'AbortError')) {
+                console.log('Retrying audio initialization...');
+                setTimeout(() => initializeAudio(retryCount + 1), 1000);
+            } else {
+                isInitializing = false;
+            }
+        }
+    }
+
+    // Function to cleanup audio stream
+    function cleanupAudioStream() {
+        if (audioStream) {
+            audioStream.getTracks().forEach(track => {
+                track.stop();
+                console.log('Audio track stopped:', track.kind);
+            });
+            audioStream = null;
         }
     }
 
     micBtn.addEventListener('mousedown', async (e) => {
         e.preventDefault();
+        console.log('Mic button mouse down');
         
-        if (!mediaRecorder) {
-            await initializeAudio();
+        // Check browser support first
+        if (!isMediaRecorderSupported()) {
+            alert('Voice recording is not supported in your browser.');
             return;
         }
+        
+        if (!mediaRecorder) {
+            console.log('MediaRecorder not initialized, initializing now...');
+            await initializeAudio();
+            // Wait a moment for initialization to complete
+            if (!mediaRecorder) {
+                console.error('Failed to initialize MediaRecorder');
+                return;
+            }
+        }
 
-        if (!mediaRecorder.stream.active) {
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        // Check if stream is still active
+        if (!mediaRecorder.stream || !mediaRecorder.stream.active) {
+            console.log('Audio stream not active, reinitializing...');
+            cleanupAudioStream();
             mediaRecorder = null;
             await initializeAudio();
-            return;
+            if (!mediaRecorder) return;
         }
 
         if (!isRecording) {
             try {
+                console.log('Starting recording...');
                 audioChunks = [];
                 isRecording = true;
                 recordingStartTime = Date.now();
@@ -1451,8 +1569,10 @@
                 recordingIndicator.style.display = 'flex';
                 messageInput.disabled = true;
                 sendBtn.disabled = true;
+                console.log('✓ Recording started');
             } catch (error) {
                 console.error('Error starting recording:', error);
+                alert('Failed to start recording: ' + error.message);
                 isRecording = false;
                 micBtn.classList.remove('recording');
                 recordingIndicator.style.display = 'none';
@@ -1465,35 +1585,49 @@
     document.addEventListener('mouseup', () => {
         if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
             try {
+                console.log('Stopping recording...');
                 isRecording = false;
+                const recordingDuration = (Date.now() - recordingStartTime) / 1000;
+                console.log('Recording duration:', recordingDuration.toFixed(2), 'seconds');
                 mediaRecorder.stop();
                 micBtn.classList.remove('recording');
                 recordingIndicator.style.display = 'none';
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
+                console.log('✓ Recording stopped');
             } catch (error) {
                 console.error('Error stopping recording:', error);
+                alert('Error stopping recording: ' + error.message);
             }
         }
     });
 
     micBtn.addEventListener('touchstart', async (e) => {
         e.preventDefault();
+        console.log('Mic button touch start');
         
-        if (!mediaRecorder) {
-            await initializeAudio();
+        if (!isMediaRecorderSupported()) {
+            alert('Voice recording is not supported in your browser.');
             return;
         }
+        
+        if (!mediaRecorder) {
+            console.log('MediaRecorder not initialized, initializing now...');
+            await initializeAudio();
+            if (!mediaRecorder) return;
+        }
 
-        if (!mediaRecorder.stream.active) {
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        if (!mediaRecorder.stream || !mediaRecorder.stream.active) {
+            console.log('Audio stream not active, reinitializing...');
+            cleanupAudioStream();
             mediaRecorder = null;
             await initializeAudio();
-            return;
+            if (!mediaRecorder) return;
         }
 
         if (!isRecording) {
             try {
+                console.log('Starting touch recording...');
                 audioChunks = [];
                 isRecording = true;
                 recordingStartTime = Date.now();
@@ -1503,8 +1637,10 @@
                 recordingIndicator.style.display = 'flex';
                 messageInput.disabled = true;
                 sendBtn.disabled = true;
+                console.log('✓ Touch recording started');
             } catch (error) {
                 console.error('Error starting touch recording:', error);
+                alert('Failed to start recording: ' + error.message);
                 isRecording = false;
             }
         }
@@ -1513,25 +1649,48 @@
     document.addEventListener('touchend', () => {
         if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
             try {
+                console.log('Stopping touch recording...');
                 isRecording = false;
+                const recordingDuration = (Date.now() - recordingStartTime) / 1000;
+                console.log('Touch recording duration:', recordingDuration.toFixed(2), 'seconds');
                 mediaRecorder.stop();
                 micBtn.classList.remove('recording');
                 recordingIndicator.style.display = 'none';
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
+                console.log('✓ Touch recording stopped');
             } catch (error) {
                 console.error('Error stopping touch recording:', error);
+                alert('Error stopping recording: ' + error.message);
             }
         }
     });
 
     async function sendVoiceMessage(audioBlob) {
+        console.log('Sending voice message, blob size:', audioBlob.size);
+        
+        if (audioBlob.size === 0) {
+            alert('Audio recording is empty. Please try again.');
+            return;
+        }
+        
+        if (audioBlob.size > 50 * 1024 * 1024) { // 50MB limit
+            alert('Audio file is too large (max 50MB). Please record a shorter message.');
+            return;
+        }
+        
         const duration = (Date.now() - recordingStartTime) / 1000;
         const formData = new FormData();
         formData.append('audio', audioBlob, 'voice_message.webm');
-        formData.append('duration', duration.toFixed(2));
+        formData.append('duration', Math.round(duration));
+
+        // Disable UI during upload
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+        micBtn.disabled = true;
 
         try {
+            console.log('Uploading voice message to /group/' + groupCode + '/upload-voice/');
             const response = await fetch(`/group/${groupCode}/upload-voice/`, {
                 method: 'POST',
                 body: formData,
@@ -1540,18 +1699,35 @@
                 }
             });
 
-            if (response.ok) {
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                console.log('✓ Voice message uploaded successfully');
                 // Fetch new messages instead of reloading page
                 setTimeout(fetchNewMessages, 500);
             } else {
-                const error = await response.json();
-                alert('Failed to send voice message: ' + error.error);
+                const errorMsg = data.error || 'Unknown error';
+                console.error('Voice message upload failed:', errorMsg);
+                alert('Failed to send voice message: ' + errorMsg);
             }
         } catch (error) {
             console.error('Error sending voice message:', error);
             alert('Error sending voice message: ' + error.message);
+        } finally {
+            // Re-enable UI
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            micBtn.disabled = false;
         }
     }
+
+    // Cleanup audio stream on page unload
+    window.addEventListener('beforeunload', () => {
+        if (isRecording && mediaRecorder) {
+            mediaRecorder.stop();
+        }
+        cleanupAudioStream();
+    });
 
     // === AUDIO PLAYBACK ===
     let currentAudio = null;
@@ -1776,6 +1952,73 @@
     }
 
     // Start polling for new messages with proper dynamic interval handling
+    // === USER STATUS HEARTBEAT - Keep-alive for auto-timeout detection ===
+    let heartbeatIntervalId = null;
+    let lastActivityTime = Date.now();
+
+    // Track user activity to reset heartbeat
+    document.addEventListener('mousemove', () => {
+        lastActivityTime = Date.now();
+    });
+    document.addEventListener('keypress', () => {
+        lastActivityTime = Date.now();
+    });
+    document.addEventListener('click', () => {
+        lastActivityTime = Date.now();
+    });
+
+    async function sendHeartbeat() {
+        try {
+            const formData = new FormData();
+            formData.append('is_online', 'true');
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+            const response = await fetch(`/group/${groupCode}/update-status/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                console.debug('✓ Heartbeat sent, online_count:', data.online_count);
+            } else {
+                console.warn('Heartbeat failed:', data.error);
+            }
+        } catch (error) {
+            console.warn('Heartbeat error:', error);
+        }
+    }
+
+    function startHeartbeat() {
+        if (heartbeatIntervalId) {
+            console.log('Heartbeat already started');
+            return;
+        }
+
+        console.log('Starting user status heartbeat (every 30 seconds)...');
+        
+        // Send heartbeat immediately
+        sendHeartbeat();
+        
+        // Then every 30 seconds
+        heartbeatIntervalId = setInterval(() => {
+            if (!document.hidden) {
+                sendHeartbeat();
+            }
+        }, 30000); // 30 seconds
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatIntervalId) {
+            console.log('Stopping user status heartbeat...');
+            clearInterval(heartbeatIntervalId);
+            heartbeatIntervalId = null;
+        }
+    }
+
     function startPolling() {
         if (pollIntervalId) {
             console.log('Polling already started');
@@ -1783,6 +2026,9 @@
         }
 
         console.log('Starting message polling...');
+        
+        // Start heartbeat along with polling
+        startHeartbeat();
 
         // Initial fetch
         fetchNewMessages();
@@ -1811,6 +2057,9 @@
             clearTimeout(pollIntervalId);
             pollIntervalId = null;
         }
+        
+        // Also stop heartbeat
+        stopHeartbeat();
     }
 
     // Message submission handler function

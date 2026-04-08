@@ -24,20 +24,26 @@ def chat(request):
         request.session['user_name'] = user_name
         request.session['user_id'] = request.session.get('user_id') or str(uuid.uuid4())
         
-        # Get or create group
+        # Get or create group and update last activity
         group, created = Group.objects.get_or_create(code=code, defaults={"name": code})
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
         
-        # Create or update anonymous user record
+        # Create or update anonymous user record and mark online
         try:
             anon_user, created = AnonymousUser.objects.get_or_create(
                 session_id=request.session.session_key,
-                defaults={'user_name': user_name}
+                defaults={'user_name': user_name, 'is_online': True, 'last_seen': timezone.now()}
             )
             if not created:
                 anon_user.user_name = user_name
+                anon_user.is_online = True
+                anon_user.last_seen = timezone.now()
                 anon_user.save()
-        except:
-            pass
+            
+            print(f"✓ User '{user_name}' joined group '{code}'")
+        except Exception as e:
+            print(f"Error creating user record: {str(e)}")
         
         # Add group code to session
         request.session['group_code'] = code
@@ -80,7 +86,7 @@ def group(request, code):
 
 @require_http_methods(["POST"])
 def upload_voice_message(request, code):
-    """Handle voice message uploads"""
+    """Handle voice message uploads with activity tracking"""
     try:
         group = Group.objects.get(code=code)
         user_name = request.session.get('user_name', 'Anonymous')
@@ -96,6 +102,14 @@ def upload_voice_message(request, code):
         if audio_file.size > 50 * 1024 * 1024:
             return JsonResponse({'error': 'Audio file too large (max 50MB)'}, status=400)
         
+        # Create or update anonymous user
+        anon_user, _ = AnonymousUser.objects.get_or_create(
+            session_id=session_id,
+            defaults={'user_name': user_name}
+        )
+        anon_user.last_seen = timezone.now()
+        anon_user.save(update_fields=['last_seen'])
+        
         # Create voice message
         message = Message.objects.create(
             group=group,
@@ -106,6 +120,12 @@ def upload_voice_message(request, code):
             session_id=session_id
         )
         
+        # Update group last activity
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
+        
+        print(f"✓ Voice message uploaded: {user_name} in group {group.code} (duration: {duration}s)")
+        
         return JsonResponse({
             'success': True,
             'message_id': message.id,
@@ -114,6 +134,7 @@ def upload_voice_message(request, code):
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
+        print(f"Error in upload_voice_message: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["POST"])
@@ -149,13 +170,14 @@ def delete_message(request, code):
 
 @require_http_methods(["POST"])
 def update_user_status(request, code):
-    """Update user online/offline status"""
+    """Update user online/offline status with auto-timeout detection"""
     try:
         group = Group.objects.get(code=code)
         user_name = request.session.get('user_name', 'Anonymous')
         session_id = request.session.session_key
         is_online = request.POST.get('is_online', 'false').lower() == 'true'
         
+        # Update or create anonymous user record
         anon_user, _ = AnonymousUser.objects.get_or_create(
             session_id=session_id,
             defaults={'user_name': user_name}
@@ -164,10 +186,27 @@ def update_user_status(request, code):
         anon_user.last_seen = timezone.now()
         anon_user.save()
         
-        # Get updated online count
+        # Update group last activity timestamp
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
+        
+        # Auto-mark users offline if inactive for 30 minutes
+        # (This is a safety net - frontend should also ping regularly)
+        thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
+        inactive_users = AnonymousUser.objects.filter(
+            is_online=True,
+            last_seen__lt=thirty_min_ago
+        )
+        for user in inactive_users:
+            user.is_online = False
+            user.save(update_fields=['is_online'])
+            print(f"Auto-marked user {user.user_name} as offline (inactive for 30+ minutes)")
+        
+        # Get updated online count for this group
+        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
         online_count = AnonymousUser.objects.filter(
             is_online=True,
-            last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
+            last_seen__gte=five_min_ago
         ).count()
         
         return JsonResponse({
@@ -175,7 +214,10 @@ def update_user_status(request, code):
             'is_online': anon_user.is_online,
             'online_count': online_count
         })
+    except Group.DoesNotExist:
+        return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
+        print(f"Error in update_user_status: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["GET"])
@@ -252,11 +294,34 @@ def get_new_messages(request, code):
             
             messages_list.append(message_obj)
         
-        # Get online count
+        # Get online count and update last activity
+        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
         online_count = AnonymousUser.objects.filter(
             is_online=True,
-            last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
+            last_seen__gte=five_min_ago
         ).count()
+        
+        # Auto-delete groups that have been empty for 30+ minutes
+        thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
+        empty_groups = Group.objects.filter(
+            last_activity__lt=thirty_min_ago
+        ).exclude(messages__isnull=False)
+        
+        deleted_count = 0
+        for empty_group in empty_groups:
+            # Double-check online count for this specific group
+            group_online = AnonymousUser.objects.filter(
+                is_online=True,
+                last_seen__gte=five_min_ago
+            ).count()
+            
+            if group_online == 0:
+                print(f"Auto-deleting empty group: {empty_group.code}")
+                empty_group.delete()
+                deleted_count += 1
+        
+        if deleted_count > 0:
+            print(f"Auto-deleted {deleted_count} empty groups")
         
         return JsonResponse({
             'success': True,
@@ -267,11 +332,12 @@ def get_new_messages(request, code):
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
+        print(f"Error in get_new_messages: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["POST"])
 def send_message_ajax(request, code):
-    """Send text message via AJAX - for live updates"""
+    """Send text message via AJAX - for live updates with activity tracking"""
     try:
         group = Group.objects.get(code=code)
         user_name = request.session.get('user_name', 'Anonymous')
@@ -281,6 +347,19 @@ def send_message_ajax(request, code):
         if not content:
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
         
+        # Validate message length
+        if len(content) > 5000:
+            return JsonResponse({'error': 'Message too long (max 5000 characters)'}, status=400)
+        
+        # Create or update anonymous user
+        anon_user, _ = AnonymousUser.objects.get_or_create(
+            session_id=session_id,
+            defaults={'user_name': user_name}
+        )
+        anon_user.last_seen = timezone.now()
+        anon_user.save(update_fields=['last_seen'])
+        
+        # Create text message
         message = Message.objects.create(
             group=group,
             content=content,
@@ -288,6 +367,12 @@ def send_message_ajax(request, code):
             user_name=user_name,
             session_id=session_id
         )
+        
+        # Update group last activity
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
+        
+        print(f"✓ Text message sent: {user_name} in group {group.code}")
         
         return JsonResponse({
             'success': True,
@@ -303,4 +388,5 @@ def send_message_ajax(request, code):
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
+        print(f"Error in send_message_ajax: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)

@@ -19,12 +19,37 @@ class Group(models.Model):
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=10, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Track last activity for auto-delete feature
+    last_activity = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-last_activity']
+        indexes = [
+            models.Index(fields=['last_activity']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def get_online_count(self):
+        """Get count of users online in last 5 minutes"""
+        from django.utils import timezone
+        from datetime import timedelta
+        five_min_ago = timezone.now() - timedelta(minutes=5)
+        return AnonymousUser.objects.filter(
+            session__group=self,
+            is_online=True,
+            last_seen__gte=five_min_ago
+        ).count()
+
+    def should_auto_delete(self):
+        """Check if group should be auto-deleted (no users for 30 minutes)"""
+        from django.utils import timezone
+        from datetime import timedelta
+        thirty_min_ago = timezone.now() - timedelta(minutes=30)
+        online_count = self.get_online_count()
+        return online_count == 0 and self.last_activity < thirty_min_ago
 
 class Message(models.Model):
     MESSAGE_TYPE_CHOICES = [
