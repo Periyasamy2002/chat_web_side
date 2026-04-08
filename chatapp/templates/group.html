@@ -1168,7 +1168,7 @@
 
     <!-- INPUT AREA -->
     <div class="input-area">
-        <form class="input-form" id="messageForm" onsubmit="return false;">
+        <form class="input-form" id="messageForm">
             {% csrf_token %}
             <div class="input-wrapper">
                 <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
@@ -1772,12 +1772,13 @@
 
     // Message submission handler function
     let isSubmittingMessage = false;
+    let listenersInitialized = false; // Guard flag to prevent duplicate listeners
     
     function sendMessage() {
         // Prevent double submission
         if (isSubmittingMessage) {
             console.warn('Message submission already in progress');
-            return;
+            return false;
         }
 
         const messageInput = document.getElementById('messageInput');
@@ -1785,21 +1786,19 @@
         
         if (!messageInput) {
             console.error('Message input not found');
-            alert('Error: Unable to find message input');
-            return;
+            return false;
         }
         
         if (!sendBtn) {
             console.error('Send button not found');
-            alert('Error: Unable to find send button');
-            return;
+            return false;
         }
         
         const message = messageInput.value.trim();
 
         if (!message) {
             console.debug('Empty message, not sending');
-            return;
+            return false;
         }
 
         console.log('Sending message:', message);
@@ -1819,7 +1818,7 @@
             isSubmittingMessage = false;
             sendBtn.disabled = false;
             sendBtn.style.opacity = '1';
-            return;
+            return false;
         }
 
         fetch(`/group/${groupCode}/send-message/`, {
@@ -1860,38 +1859,52 @@
             sendBtn.disabled = false;
             sendBtn.style.opacity = '1';
         });
+        
+        return false;
     }
 
     // Initialize event listeners when DOM is ready
     function initializeEventListeners() {
+        // Guard flag to prevent duplicate listener attachment
+        if (listenersInitialized) {
+            console.log('Event listeners already initialized, skipping');
+            return;
+        }
+        
         console.log('Initializing event listeners...');
         
+        const messageForm = document.getElementById('messageForm');
         const sendBtn = document.getElementById('sendBtn');
         const messageInput = document.getElementById('messageInput');
-        const messagesScroll = document.getElementById('messagesScroll');
         
         if (!sendBtn) {
             console.error('❌ Send button not found');
+            return;
         } else {
             console.log('✓ Send button found');
         }
         
         if (!messageInput) {
             console.error('❌ Message input not found');
+            return;
         } else {
             console.log('✓ Message input found');
         }
         
-        if (!messagesScroll) {
-            console.error('❌ Messages scroll container not found');
+        if (!messageForm) {
+            console.error('❌ Message form not found');
+            return;
         } else {
-            console.log('✓ Messages scroll container found');
+            console.log('✓ Message form found');
         }
         
-        if (!sendBtn || !messageInput) {
-            console.error('Cannot initialize: required elements not found');
-            return;
-        }
+        // Prevent form submission
+        messageForm.addEventListener('submit', function(e) {
+            console.log('Form submit event intercepted');
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }, true); // Use capture phase to catch early
         
         // Send message on button click
         sendBtn.addEventListener('click', function(e) {
@@ -1899,16 +1912,19 @@
             e.preventDefault();
             e.stopPropagation();
             sendMessage();
-        });
+            return false;
+        }, false);
 
         // Send message on Enter key press in input
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 console.log('Enter key pressed in message input');
                 e.preventDefault();
+                e.stopPropagation();
                 sendMessage();
+                return false;
             }
-        });
+        }, false);
         
         // Mobile touch support for button
         if ('ontouchstart' in window) {
@@ -1918,10 +1934,13 @@
                 e.preventDefault();
                 e.stopPropagation();
                 sendMessage();
-            });
+                return false;
+            }, false);
         }
         
-        console.log('Event listeners initialized successfully');
+        // Mark as initialized to prevent re-attachment
+        listenersInitialized = true;
+        console.log('✓ Event listeners initialized successfully');
     }
 
     // Wait for DOM to be ready
