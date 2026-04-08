@@ -24,10 +24,18 @@ def chat(request):
         request.session['user_name'] = user_name
         request.session['user_id'] = request.session.get('user_id') or str(uuid.uuid4())
         
-        # Get or create group and update last activity
+        # Get or create group
         group, created = Group.objects.get_or_create(code=code, defaults={"name": code})
-        group.last_activity = timezone.now()
-        group.save(update_fields=['last_activity'])
+        
+        # Update last activity if field exists (after migration)
+        try:
+            group.last_activity = timezone.now()
+            group.save(update_fields=['last_activity'])
+        except Exception as e:
+            # If migration hasn't been applied yet, skip this
+            if 'last_activity' not in str(e):
+                raise
+            print(f"Note: last_activity field not yet available. Run: python manage.py migrate")
         
         # Create or update anonymous user record and mark online
         try:
@@ -120,9 +128,14 @@ def upload_voice_message(request, code):
             session_id=session_id
         )
         
-        # Update group last activity
-        group.last_activity = timezone.now()
-        group.save(update_fields=['last_activity'])
+        # Update group last activity if field exists
+        try:
+            if hasattr(group, 'last_activity'):
+                group.last_activity = timezone.now()
+                group.save(update_fields=['last_activity'])
+        except Exception as e:
+            if 'last_activity' not in str(e):
+                raise
         
         print(f"✓ Voice message uploaded: {user_name} in group {group.code} (duration: {duration}s)")
         
@@ -186,21 +199,29 @@ def update_user_status(request, code):
         anon_user.last_seen = timezone.now()
         anon_user.save()
         
-        # Update group last activity timestamp
-        group.last_activity = timezone.now()
-        group.save(update_fields=['last_activity'])
+        # Update group last activity timestamp if field exists
+        try:
+            if hasattr(group, 'last_activity'):
+                group.last_activity = timezone.now()
+                group.save(update_fields=['last_activity'])
+        except Exception as e:
+            if 'last_activity' not in str(e):
+                raise
         
         # Auto-mark users offline if inactive for 30 minutes
         # (This is a safety net - frontend should also ping regularly)
-        thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
-        inactive_users = AnonymousUser.objects.filter(
-            is_online=True,
-            last_seen__lt=thirty_min_ago
-        )
-        for user in inactive_users:
-            user.is_online = False
-            user.save(update_fields=['is_online'])
-            print(f"Auto-marked user {user.user_name} as offline (inactive for 30+ minutes)")
+        try:
+            thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
+            inactive_users = AnonymousUser.objects.filter(
+                is_online=True,
+                last_seen__lt=thirty_min_ago
+            )
+            for user in inactive_users:
+                user.is_online = False
+                user.save(update_fields=['is_online'])
+                print(f"Auto-marked user {user.user_name} as offline (inactive for 30+ minutes)")
+        except Exception as e:
+            print(f"Warning: Could not auto-mark users offline: {str(e)}")
         
         # Get updated online count for this group
         five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
@@ -301,27 +322,32 @@ def get_new_messages(request, code):
             last_seen__gte=five_min_ago
         ).count()
         
-        # Auto-delete groups that have been empty for 30+ minutes
-        thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
-        empty_groups = Group.objects.filter(
-            last_activity__lt=thirty_min_ago
-        ).exclude(messages__isnull=False)
-        
-        deleted_count = 0
-        for empty_group in empty_groups:
-            # Double-check online count for this specific group
-            group_online = AnonymousUser.objects.filter(
-                is_online=True,
-                last_seen__gte=five_min_ago
-            ).count()
-            
-            if group_online == 0:
-                print(f"Auto-deleting empty group: {empty_group.code}")
-                empty_group.delete()
-                deleted_count += 1
-        
-        if deleted_count > 0:
-            print(f"Auto-deleted {deleted_count} empty groups")
+        # Auto-delete groups only if migration has been applied
+        try:
+            if hasattr(group, 'last_activity'):
+                thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
+                empty_groups = Group.objects.filter(
+                    last_activity__lt=thirty_min_ago
+                ).exclude(messages__isnull=False)
+                
+                deleted_count = 0
+                for empty_group in empty_groups:
+                    # Double-check online count for this specific group
+                    group_online = AnonymousUser.objects.filter(
+                        is_online=True,
+                        last_seen__gte=five_min_ago
+                    ).count()
+                    
+                    if group_online == 0:
+                        print(f"Auto-deleting empty group: {empty_group.code}")
+                        empty_group.delete()
+                        deleted_count += 1
+                
+                if deleted_count > 0:
+                    print(f"Auto-deleted {deleted_count} empty groups")
+        except Exception as e:
+            if 'last_activity' not in str(e):
+                print(f"Warning: Auto-delete check failed: {str(e)}")
         
         return JsonResponse({
             'success': True,
@@ -368,9 +394,14 @@ def send_message_ajax(request, code):
             session_id=session_id
         )
         
-        # Update group last activity
-        group.last_activity = timezone.now()
-        group.save(update_fields=['last_activity'])
+        # Update group last activity if field exists
+        try:
+            if hasattr(group, 'last_activity'):
+                group.last_activity = timezone.now()
+                group.save(update_fields=['last_activity'])
+        except Exception as e:
+            if 'last_activity' not in str(e):
+                raise
         
         print(f"✓ Text message sent: {user_name} in group {group.code}")
         
