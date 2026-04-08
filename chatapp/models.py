@@ -47,9 +47,18 @@ class Group(models.Model):
         """Check if group should be auto-deleted (no users for 30 minutes)"""
         from django.utils import timezone
         from datetime import timedelta
-        thirty_min_ago = timezone.now() - timedelta(minutes=30)
-        online_count = self.get_online_count()
-        return online_count == 0 and self.last_activity < thirty_min_ago
+        
+        # Check if migration has been applied (last_activity field exists)
+        if not hasattr(self, 'last_activity'):
+            return False
+        
+        try:
+            thirty_min_ago = timezone.now() - timedelta(minutes=30)
+            online_count = self.get_online_count()
+            return online_count == 0 and self.last_activity < thirty_min_ago
+        except Exception:
+            # If any error occurs, don't auto-delete (safer approach)
+            return False
 
 class Message(models.Model):
     MESSAGE_TYPE_CHOICES = [
