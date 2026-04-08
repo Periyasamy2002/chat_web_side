@@ -77,6 +77,7 @@ class Message(models.Model):
     session_id = models.CharField(max_length=255, default='')
     content = models.TextField(blank=True, null=True)
     audio_file = models.FileField(upload_to='voice_messages/', blank=True, null=True)
+    audio_mime_type = models.CharField(max_length=50, default='audio/webm', help_text='MIME type of audio file')
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     duration = models.FloatField(default=0)
     

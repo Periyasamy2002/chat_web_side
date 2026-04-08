@@ -1152,7 +1152,15 @@
                                         {% endif %}
                                     </div>
                                     <audio style="display: none;" data-duration="{{ msg.duration }}">
-                                        <source src="{{ msg.audio_file.url }}" type="audio/webm">
+                                        <source src="{{ msg.audio_file.url }}" type="{{ msg.audio_mime_type|default:'audio/webm' }}">
+                                        <!-- Fallback MIME types for browser compatibility -->
+                                        {% if msg.audio_mime_type and 'webm' in msg.audio_mime_type or 'opus' in msg.audio_mime_type %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/ogg;codecs=opus">
+                                        {% elif msg.audio_mime_type and 'mp4' in msg.audio_mime_type or 'aac' in msg.audio_mime_type %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/aac">
+                                        {% else %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/ogg">
+                                        {% endif %}
                                     </audio>
                                 </div>
                             {% endif %}
@@ -1683,6 +1691,7 @@
         const formData = new FormData();
         formData.append('audio', audioBlob, 'voice_message.webm');
         formData.append('duration', Math.round(duration));
+        formData.append('audio_mime_type', mediaRecorder.mimeType || 'audio/webm');
 
         // Disable UI during upload
         messageInput.disabled = true;
@@ -1691,6 +1700,7 @@
 
         try {
             console.log('Uploading voice message to /group/' + groupCode + '/upload-voice/');
+            console.log('MIME type:', mediaRecorder.mimeType || 'audio/webm');
             const response = await fetch(`/group/${groupCode}/upload-voice/`, {
                 method: 'POST',
                 body: formData,
@@ -1703,6 +1713,7 @@
             
             if (response.ok && data.success) {
                 console.log('✓ Voice message uploaded successfully');
+                console.log('Audio MIME type saved:', data.audio_mime_type);
                 // Fetch new messages instead of reloading page
                 setTimeout(fetchNewMessages, 500);
             } else {
@@ -1741,6 +1752,7 @@
 
         if (!audio) {
             console.error('No audio element found');
+            alert('Audio element not found. Please try refreshing the page.');
             return;
         }
 
@@ -1752,30 +1764,64 @@
         }
 
         if (audio.paused) {
-            audio.play().catch(err => console.error('Playback error:', err));
-            button.textContent = '⏸️';
-            currentAudio = audio;
+            console.log('Starting playback...');
+            console.log('Audio source:', audio.querySelector('source')?.src);
+            console.log('Audio MIME type:', audio.querySelector('source')?.type);
+            
+            audio.play()
+                .then(() => {
+                    console.log('✓ Audio playback started successfully');
+                    button.textContent = '⏸️';
+                    currentAudio = audio;
 
-            if (audioPlaybackHandlers.has(audio)) {
-                const handlers = audioPlaybackHandlers.get(audio);
-                audio.removeEventListener('timeupdate', handlers.timeupdate);
-                audio.removeEventListener('ended', handlers.ended);
-            }
+                    if (audioPlaybackHandlers.has(audio)) {
+                        const handlers = audioPlaybackHandlers.get(audio);
+                        audio.removeEventListener('timeupdate', handlers.timeupdate);
+                        audio.removeEventListener('ended', handlers.ended);
+                        audio.removeEventListener('error', handlers.error);
+                    }
 
-            const timeUpdateHandler = function() { updateProgressBar.call(this); };
-            const endedHandler = function() {
-                button.textContent = '▶️';
-                updateProgressBar.call(this);
-            };
+                    const timeUpdateHandler = function() { updateProgressBar.call(this); };
+                    const endedHandler = function() {
+                        button.textContent = '▶️';
+                        updateProgressBar.call(this);
+                        console.log('✓ Audio playback finished');
+                    };
+                    const errorHandler = function(e) {
+                        console.error('Audio playback error:', e);
+                        console.error('Error details:', {
+                            error: e.target.error?.code,
+                            message: e.target.error?.message,
+                            src: audio.querySelector('source')?.src,
+                            type: audio.querySelector('source')?.type
+                        });
+                        button.textContent = '▶️';
+                        alert('Error playing audio: ' + (e.target.error?.message || 'Unknown error. Try refreshing the page.'));
+                    };
 
-            audio.addEventListener('timeupdate', timeUpdateHandler);
-            audio.addEventListener('ended', endedHandler);
+                    audio.addEventListener('timeupdate', timeUpdateHandler);
+                    audio.addEventListener('ended', endedHandler);
+                    audio.addEventListener('error', errorHandler);
 
-            audioPlaybackHandlers.set(audio, {
-                timeupdate: timeUpdateHandler,
-                ended: endedHandler
-            });
+                    audioPlaybackHandlers.set(audio, {
+                        timeupdate: timeUpdateHandler,
+                        ended: endedHandler,
+                        error: errorHandler
+                    });
+                })
+                .catch(err => {
+                    console.error('Playback error:', err);
+                    console.error('Error details:', {
+                        name: err.name,
+                        message: err.message,
+                        src: audio.querySelector('source')?.src,
+                        type: audio.querySelector('source')?.type
+                    });
+                    button.textContent = '▶️';
+                    alert('Error playing audio: ' + err.message);
+                });
         } else {
+            console.log('Pausing audio...');
             audio.pause();
             button.textContent = '▶️';
         }
@@ -1850,10 +1896,25 @@
                 messageHTML += `<div class="message-content">${escapeHtml(msg.content)}</div>`;
             }
         } else if (msg.message_type === 'voice') {
+            const mimeType = msg.audio_mime_type || 'audio/webm';
+            // Get fallback MIME types based on primary format
+            let fallbackMimeTypes = [];
+            if (mimeType.includes('webm') || mimeType.includes('opus')) {
+                fallbackMimeTypes = ['audio/webm', 'audio/ogg;codecs=opus'];
+            } else if (mimeType.includes('mp4') || mimeType.includes('aac')) {
+                fallbackMimeTypes = ['audio/mp4', 'audio/aac'];
+            } else if (mimeType.includes('ogg')) {
+                fallbackMimeTypes = ['audio/ogg', 'audio/webm'];
+            } else if (mimeType.includes('wav')) {
+                fallbackMimeTypes = ['audio/wav', 'audio/webm'];
+            } else {
+                fallbackMimeTypes = ['audio/webm', 'audio/ogg', 'audio/mp4'];
+            }
+            
             messageHTML += `
                 <div class="voice-message">
                     <div class="voice-controls">
-                        <button class="play-btn" onclick="togglePlayPause(event, this)">▶️</button>
+                        <button class="play-btn" onclick="togglePlayPause(event, this)" title="Play audio">▶️</button>
                     </div>
                     <div class="voice-progress">
                         <div class="progress-bar" onclick="seekAudio(event, this)">
@@ -1864,7 +1925,17 @@
                         <span class="duration-text">${msg.duration || 0}s</span>
                     </div>
                     <audio style="display: none;" data-duration="${msg.duration}">
-                        <source src="${msg.audio_url}" type="audio/webm">
+                        <source src="${msg.audio_url}" type="${mimeType}">`;
+            
+            // Add fallback MIME types
+            for (let fallbackType of fallbackMimeTypes) {
+                if (fallbackType !== mimeType) {
+                    messageHTML += `<source src="${msg.audio_url}" type="${fallbackType}">`;
+                }
+            }
+            
+            messageHTML += `
+                        Your browser does not support the audio element.
                     </audio>
                 </div>`;
         }

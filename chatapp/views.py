@@ -105,6 +105,7 @@ def upload_voice_message(request, code):
         
         audio_file = request.FILES['audio']
         duration = float(request.POST.get('duration', 0))
+        audio_mime_type = request.POST.get('audio_mime_type', 'audio/webm')
         
         # Validate file size (max 50MB)
         if audio_file.size > 50 * 1024 * 1024:
@@ -122,6 +123,7 @@ def upload_voice_message(request, code):
         message = Message.objects.create(
             group=group,
             audio_file=audio_file,
+            audio_mime_type=audio_mime_type,
             message_type='voice',
             duration=max(duration, 1),
             user_name=user_name,
@@ -142,7 +144,9 @@ def upload_voice_message(request, code):
         return JsonResponse({
             'success': True,
             'message_id': message.id,
-            'audio_url': message.audio_file.url
+            'audio_url': message.audio_file.url,
+            'audio_mime_type': message.audio_mime_type,
+            'duration': duration
         })
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found'}, status=404)
@@ -290,7 +294,7 @@ def get_new_messages(request, code):
         
         messages = messages_query.values(
             'id', 'user_name', 'session_id', 'content', 'message_type', 
-            'audio_file', 'duration', 'timestamp', 'is_deleted'
+            'audio_file', 'audio_mime_type', 'duration', 'timestamp', 'is_deleted'
         )
         
         messages_list = []
@@ -311,6 +315,7 @@ def get_new_messages(request, code):
             
             if msg['message_type'] == 'voice':
                 message_obj['audio_url'] = msg['audio_file']
+                message_obj['audio_mime_type'] = msg['audio_mime_type'] or 'audio/webm'
                 message_obj['duration'] = msg['duration']
             
             messages_list.append(message_obj)
