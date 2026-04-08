@@ -746,6 +746,266 @@
             max-width: calc(100% - 2rem);
         }
     }
+
+    /* ========== ADDITIONAL MOBILE MEDIA QUERIES ========== */
+    @media (max-width: 480px) {
+        .chat-page {
+            height: calc(100vh - 80px);
+        }
+
+        .chat-header {
+            padding: 0.75rem 1rem;
+        }
+
+        .header-top {
+            margin-bottom: 0.5rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1rem;
+            margin: 0;
+        }
+
+        .header-info {
+            font-size: 0.75rem;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .online-indicator {
+            width: 10px;
+            height: 10px;
+        }
+
+        .online-count {
+            padding: 0.2rem 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .messages-scroll {
+            padding: 0.75rem 1rem;
+            gap: 0.8rem;
+        }
+
+        .message-bubble {
+            max-width: 90%;
+            padding: 0.6rem 0.8rem;
+        }
+
+        .message-header {
+            margin-bottom: 0.2rem;
+        }
+
+        .message-bubble b {
+            font-size: 0.8rem;
+        }
+
+        .message-time {
+            font-size: 0.7rem;
+            margin-top: 0.2rem;
+        }
+
+        .voice-message {
+            gap: 0.5rem;
+        }
+
+        .play-btn {
+            width: 32px;
+            height: 32px;
+            font-size: 1rem;
+        }
+
+        .voice-duration {
+            min-width: 30px;
+            font-size: 0.7rem;
+        }
+
+        .input-area {
+            padding: 0.6rem 0.75rem;
+        }
+
+        .input-form {
+            gap: 0.4rem;
+        }
+
+        .input-form input {
+            padding: 0.6rem 0.8rem;
+            font-size: 0.95rem;
+            border-radius: 20px;
+        }
+
+        .send-btn, .mic-btn {
+            padding: 0.5rem 0.7rem;
+            min-width: 40px;
+            font-size: 0.95rem;
+            border-radius: 20px;
+        }
+
+        .recording-indicator {
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+
+        .recording-dot {
+            width: 6px;
+            height: 6px;
+        }
+
+        .context-menu {
+            min-width: 150px;
+            font-size: 0.9rem;
+        }
+
+        .context-menu-item {
+            padding: 0.6rem 0.8rem;
+            font-size: 0.9rem;
+        }
+
+        .participants-list {
+            min-width: 220px;
+            max-height: 300px;
+        }
+
+        .participant-avatar {
+            width: 36px;
+            height: 36px;
+            font-size: 0.9rem;
+        }
+
+        .confirmation-content {
+            padding: 1.5rem;
+            margin: 1rem;
+            max-width: calc(100% - 2rem);
+        }
+
+        .confirmation-content h3 {
+            font-size: 1.1rem;
+        }
+
+        .confirmation-content p {
+            font-size: 0.9rem;
+        }
+
+        .confirmation-buttons button {
+            padding: 0.6rem 1.2rem;
+            font-size: 0.9rem;
+        }
+    }
+
+    @media (max-width: 360px) {
+        .chat-header h2 {
+            font-size: 0.9rem;
+        }
+
+        .header-info {
+            font-size: 0.7rem;
+        }
+
+        .message-bubble {
+            max-width: 95%;
+        }
+
+        .input-form input {
+            padding: 0.5rem 0.7rem;
+            font-size: 0.9rem;
+        }
+
+        .send-btn, .mic-btn {
+            font-size: 0.85rem;
+        }
+    }
+
+    /* ========== TABLET MEDIA QUERIES ========== */
+    @media (min-width: 769px) and (max-width: 1024px) {
+        .message-bubble {
+            max-width: 70%;
+        }
+
+        .chat-header {
+            padding: 1.2rem 1.8rem;
+        }
+
+        .messages-scroll {
+            padding: 1.2rem 1.8rem;
+        }
+
+        .input-area {
+            padding: 0.9rem 1.5rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1.4rem;
+        }
+    }
+
+    /* ========== TOUCH-FRIENDLY INTERACTIONS ========== */
+    @media (hover: none) and (pointer: coarse) {
+        .send-btn, .mic-btn {
+            min-height: 48px;
+            min-width: 48px;
+            padding: 0.75rem 1rem;
+        }
+
+        .input-form input {
+            min-height: 48px;
+        }
+
+        .message-bubble {
+            cursor: pointer;
+        }
+
+        .context-menu-item {
+            padding: 0.9rem 1rem;
+            min-height: 44px;
+        }
+
+        .play-btn {
+            min-height: 44px;
+            min-width: 44px;
+        }
+
+        .message-bubble:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+    }
+
+    /* ========== ANIMATION PERFORMANCE ========== */
+    @media (prefers-reduced-motion: reduce) {
+        * {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    /* ========== SMOOTH SCROLLING ========== */
+    html {
+        scroll-behavior: smooth;
+    }
+
+    .messages-scroll {
+        scroll-behavior: smooth;
+    }
+
+    /* ========== ORIENTATION HANDLING ========== */
+    @media (orientation: landscape) and (max-height: 500px) {
+        .chat-page {
+            height: auto;
+            min-height: 100vh;
+        }
+
+        .chat-header {
+            padding: 0.5rem 1rem;
+        }
+
+        .messages-scroll {
+            max-height: 60vh;
+        }
+
+        .input-area {
+            padding: 0.5rem;
+        }
+    }
 </style>
 
 <div class="chat-page">
@@ -1172,7 +1432,8 @@
             });
 
             if (response.ok) {
-                location.reload();
+                // Fetch new messages instead of reloading page
+                setTimeout(fetchNewMessages, 500);
             } else {
                 const error = await response.json();
                 alert('Failed to send voice message: ' + error.error);
@@ -1267,6 +1528,210 @@
     const getUserStatus = (onlineUsers, user) => {
         return onlineUsers.find(u => u.user.id === user.id) || { is_online: false, last_seen: new Date() };
     };
+
+    // === LIVE UPDATES - REAL-TIME MESSAGE POLLING ===
+    let lastUpdateTimestamp = '{{ last_message_timestamp }}' || new Date(Date.now() - 60000).toISOString();
+    let pollInterval = 1000; // Start with 1 second
+    let maxPollInterval = 3000; // Max 3 seconds
+    let pollIntervalId = null;
+    let noNewMessagesCount = 0;
+
+    function formatTime(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    function createMessageElement(msg) {
+        const isSender = msg.is_sender;
+        const timestamp = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        
+        let messageHTML = `<div class="message-group ${isSender ? 'sender' : 'receiver'}">
+            <div class="message-bubble ${isSender ? 'sender' : 'receiver'} ${msg.is_deleted === 'deleted_for_all' ? 'deleted' : ''}" 
+                 data-message-id="${msg.id}" 
+                 data-is-sender="${isSender}">`;
+
+        if (!isSender) {
+            messageHTML += `
+                <div class="message-header">
+                    <b>${msg.user_name}</b>
+                </div>`;
+        }
+
+        if (msg.message_type === 'text') {
+            if (msg.is_deleted === 'deleted_for_all') {
+                messageHTML += `<div class="message-content"><em>This message was deleted</em></div>`;
+            } else {
+                messageHTML += `<div class="message-content">${escapeHtml(msg.content)}</div>`;
+            }
+        } else if (msg.message_type === 'voice') {
+            messageHTML += `
+                <div class="voice-message">
+                    <div class="voice-controls">
+                        <button class="play-btn" onclick="togglePlayPause(event, this)">▶️</button>
+                    </div>
+                    <div class="voice-progress">
+                        <div class="progress-bar" onclick="seekAudio(event, this)">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+                    <div class="voice-duration">
+                        <span class="duration-text">${msg.duration || 0}s</span>
+                    </div>
+                    <audio style="display: none;" data-duration="${msg.duration}">
+                        <source src="${msg.audio_url}" type="audio/webm">
+                    </audio>
+                </div>`;
+        }
+
+        messageHTML += `<span class="message-time">${timestamp}</span>
+            </div>
+        </div>`;
+
+        return messageHTML;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async function fetchNewMessages() {
+        try {
+            const response = await fetch(`/group/${groupCode}/get-messages/?since=${encodeURIComponent(lastUpdateTimestamp)}`);
+            const data = await response.json();
+
+            if (data.success && data.messages && data.messages.length > 0) {
+                const messagesScroll = document.getElementById('messagesScroll');
+                const emptyState = messagesScroll.querySelector('.empty-state');
+
+                // Remove empty state if it exists
+                if (emptyState) {
+                    emptyState.remove();
+                }
+
+                // Add new messages
+                data.messages.forEach(msg => {
+                    const messageHTML = createMessageElement(msg);
+                    messagesScroll.insertAdjacentHTML('beforeend', messageHTML);
+                });
+
+                // Update last timestamp
+                if (data.messages.length > 0) {
+                    lastUpdateTimestamp = data.messages[data.messages.length - 1].timestamp;
+                }
+
+                // Auto-scroll to bottom
+                scrollToBottom();
+                noNewMessagesCount = 0;
+
+                // Reset poll interval on successful message fetch
+                pollInterval = 1000;
+            } else {
+                // No new messages, gradually increase polling interval
+                noNewMessagesCount++;
+                if (noNewMessagesCount > 3) {
+                    pollInterval = Math.min(pollInterval + 500, maxPollInterval);
+                }
+            }
+
+            // Update online count if available
+            if (data.online_count !== undefined) {
+                const onlineCountEl = document.querySelector('.online-count');
+                if (onlineCountEl) {
+                    onlineCountEl.textContent = data.online_count + ' Online';
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching new messages:', error);
+        }
+    }
+
+    // Start polling for new messages
+    function startPolling() {
+        if (!pollIntervalId) {
+            pollIntervalId = setInterval(fetchNewMessages, pollInterval);
+            // Initial fetch
+            fetchNewMessages();
+        }
+    }
+
+    function stopPolling() {
+        if (pollIntervalId) {
+            clearInterval(pollIntervalId);
+            pollIntervalId = null;
+        }
+    }
+
+    // Update message form to use AJAX
+    const messageForm = document.getElementById('messageForm');
+    messageForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const messageInput = document.getElementById('messageInput');
+        const message = messageInput.value.trim();
+
+        if (!message) {
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('message', message);
+
+        fetch(`/group/${groupCode}/send-message/`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                messageInput.value = '';
+                messageInput.focus();
+                // Fetch new messages immediately
+                fetchNewMessages();
+            } else {
+                alert('Error sending message: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error sending message');
+        });
+    });
+
+    // Start polling when page loads
+    window.addEventListener('load', function() {
+        startPolling();
+    });
+
+    // Stop polling when page is hidden
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            // Resume polling and fetch immediately
+            startPolling();
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        stopPolling();
+        // Update user status to offline
+        fetch(`/group/${groupCode}/update-status/`, {
+            method: 'POST',
+            body: new FormData(new (function() {
+                this.append = function() {};
+            })()),
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            keepalive: true
+        }).catch(() => {});
+    });
 </script>
 
 <!-- Add custom filter to Django templates -->

@@ -77,11 +77,16 @@ def group(request, code):
         last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
     ).distinct()
     
+    # Get last message timestamp for live updates
+    last_message = messages_list.order_by('-timestamp').first()
+    last_message_timestamp = last_message.timestamp.isoformat() if last_message else timezone.now().isoformat()
+    
     context = {
         "group": group,
         "messages": messages_list,
         "user_name": user_name,
         "online_count": online_users.count(),
+        "last_message_timestamp": last_message_timestamp,
     }
     
     return render(request, "group.html", context)
@@ -209,5 +214,106 @@ def get_online_users(request, code):
             'users': users_list,
             'count': len(users_list)
         })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+@require_http_methods(["GET"])
+def get_new_messages(request, code):
+    """Get new messages since last timestamp - for live updates"""
+    try:
+        group = Group.objects.get(code=code)
+        session_id = request.session.session_key
+        since_timestamp = request.GET.get('since', '')
+        
+        # Build query
+        messages_query = Message.objects.filter(group=group).order_by('timestamp')
+        
+        # Filter by timestamp if provided
+        if since_timestamp:
+            try:
+                from django.utils.dateparse import parse_datetime
+                since_dt = parse_datetime(since_timestamp)
+                if since_dt:
+                    messages_query = messages_query.filter(timestamp__gt=since_dt)
+            except:
+                pass
+        
+        messages = messages_query.values(
+            'id', 'user_name', 'session_id', 'content', 'message_type', 
+            'audio_file', 'duration', 'timestamp', 'is_deleted'
+        )
+        
+        messages_list = []
+        for msg in messages:
+            # Skip deleted messages for other users
+            if msg['is_deleted'] == 'deleted_for_me' and msg['session_id'] != session_id:
+                continue
+            
+            message_obj = {
+                'id': msg['id'],
+                'user_name': msg['user_name'],
+                'content': msg['content'],
+                'message_type': msg['message_type'],
+                'timestamp': msg['timestamp'].isoformat(),
+                'is_sender': msg['session_id'] == session_id,
+                'is_deleted': msg['is_deleted'],
+            }
+            
+            if msg['message_type'] == 'voice':
+                message_obj['audio_url'] = msg['audio_file']
+                message_obj['duration'] = msg['duration']
+            
+            messages_list.append(message_obj)
+        
+        # Get online count
+        online_count = AnonymousUser.objects.filter(
+            is_online=True,
+            last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
+        ).count()
+        
+        return JsonResponse({
+            'success': True,
+            'messages': messages_list,
+            'online_count': online_count,
+            'timestamp': timezone.now().isoformat()
+        })
+    except Group.DoesNotExist:
+        return JsonResponse({'error': 'Group not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+@require_http_methods(["POST"])
+def send_message_ajax(request, code):
+    """Send text message via AJAX - for live updates"""
+    try:
+        group = Group.objects.get(code=code)
+        user_name = request.session.get('user_name', 'Anonymous')
+        session_id = request.session.session_key
+        content = request.POST.get('message', '').strip()
+        
+        if not content:
+            return JsonResponse({'error': 'Message cannot be empty'}, status=400)
+        
+        message = Message.objects.create(
+            group=group,
+            content=content,
+            message_type='text',
+            user_name=user_name,
+            session_id=session_id
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'message': {
+                'id': message.id,
+                'user_name': message.user_name,
+                'content': message.content,
+                'timestamp': message.timestamp.isoformat(),
+                'is_sender': True,
+                'is_deleted': message.is_deleted
+            }
+        })
+    except Group.DoesNotExist:
+        return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)

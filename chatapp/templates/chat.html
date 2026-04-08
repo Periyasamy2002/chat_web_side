@@ -225,6 +225,196 @@
     .info-box strong {
         color: white;
     }
+
+    /* ========== MOBILE MEDIA QUERIES ========== */
+    @media (max-width: 768px) {
+        .chat-container {
+            max-width: 100%;
+            margin: 2rem auto;
+            padding: 1.5rem;
+            border-radius: 15px;
+            border: 1.5px solid rgba(102, 126, 234, 0.3);
+        }
+
+        .chat-header h2 {
+            font-size: 1.6rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .chat-header p {
+            font-size: 0.9rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        .form-group label {
+            font-size: 0.95rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .form-group input {
+            padding: 0.85rem;
+            font-size: 1rem;
+            border-radius: 8px;
+        }
+
+        .form-group input:focus {
+            transform: scale(1.01);
+        }
+
+        .button-group {
+            gap: 0.8rem;
+            margin-top: 1.5rem;
+        }
+
+        .submit-btn,
+        .back-btn {
+            padding: 0.9rem;
+            font-size: 0.95rem;
+            border-radius: 8px;
+        }
+
+        .info-box {
+            padding: 0.9rem;
+            margin-top: 1.5rem;
+            border-left-width: 3px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .chat-container {
+            margin: 1.5rem auto;
+            padding: 1rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1.4rem;
+        }
+
+        .chat-header p {
+            font-size: 0.85rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            font-size: 0.9rem;
+        }
+
+        .form-group input {
+            padding: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .button-group {
+            flex-direction: column;
+            gap: 0.8rem;
+            margin-top: 1.3rem;
+        }
+
+        .submit-btn,
+        .back-btn {
+            width: 100%;
+            padding: 0.85rem;
+            font-size: 0.9rem;
+        }
+
+        .info-box {
+            padding: 0.8rem;
+            margin-top: 1.2rem;
+            font-size: 0.85rem;
+        }
+    }
+
+    @media (max-width: 360px) {
+        .chat-container {
+            padding: 0.8rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1.2rem;
+        }
+
+        .chat-header p {
+            font-size: 0.8rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+        }
+
+        .form-group input {
+            font-size: 0.9rem;
+        }
+
+        .submit-btn,
+        .back-btn {
+            font-size: 0.85rem;
+        }
+    }
+
+    /* ========== TABLET MEDIA QUERIES ========== */
+    @media (min-width: 769px) and (max-width: 1024px) {
+        .chat-container {
+            max-width: 500px;
+            margin: 2.5rem auto;
+        }
+
+        .chat-header h2 {
+            font-size: 1.8rem;
+        }
+    }
+
+    /* ========== TOUCH-FRIENDLY INTERACTIONS ========== */
+    @media (hover: none) and (pointer: coarse) {
+        .form-group input,
+        .submit-btn,
+        .back-btn {
+            min-height: 48px;
+            padding: 0.75rem;
+        }
+
+        .submit-btn:hover::before {
+            left: 0;
+        }
+
+        .submit-btn:hover,
+        .back-btn:hover {
+            transform: none;
+        }
+
+        .submit-btn:active,
+        .back-btn:active {
+            transform: scale(0.98);
+        }
+    }
+
+    /* ========== ANIMATION PERFORMANCE ========== */
+    @media (prefers-reduced-motion: reduce) {
+        * {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    /* ========== HIGH CONTRAST MODE ========== */
+    @media (prefers-contrast: more) {
+        .chat-container {
+            border: 2px solid rgba(102, 126, 234, 0.5);
+        }
+
+        .submit-btn,
+        .back-btn {
+            border-width: 2px;
+        }
+    }
 </style>
 
 <div class="chat-container">

@@ -9,4 +9,6 @@ urlpatterns = [
     path("group/<str:code>/delete-message/", views.delete_message, name="delete_message"),
     path("group/<str:code>/update-status/", views.update_user_status, name="update_status"),
     path("group/<str:code>/online-users/", views.get_online_users, name="get_online_users"),
+    path("group/<str:code>/get-messages/", views.get_new_messages, name="get_messages"),
+    path("group/<str:code>/send-message/", views.send_message_ajax, name="send_message_ajax"),
 ]
