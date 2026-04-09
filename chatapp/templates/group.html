@@ -1712,10 +1712,23 @@
             const data = await response.json();
             
             if (response.ok && data.success) {
-                console.log('✓ Voice message uploaded successfully');
+                console.log('✓ Voice message uploaded successfully to server');
                 console.log('Audio MIME type saved:', data.audio_mime_type);
-                // Fetch new messages instead of reloading page
-                setTimeout(fetchNewMessages, 500);
+                console.log('Audio URL:', data.audio_url);
+                
+                // Fetch new messages IMMEDIATELY to display voice message without delay
+                console.log('Fetching new messages immediately after upload...');
+                await fetchNewMessages();
+                
+                // Retry fetch if message not found (in case of slight DB delay)
+                const messagesScroll = document.getElementById('messagesScroll');
+                const lastChild = messagesScroll?.lastElementChild;
+                const isMessageVisible = lastChild?.querySelector('audio') ? true : false;
+                
+                if (!isMessageVisible && lastChild) {
+                    console.log('Voice message not yet visible in DOM, retrying fetch in 200ms...');
+                    setTimeout(fetchNewMessages, 200);
+                }
             } else {
                 const errorMsg = data.error || 'Unknown error';
                 console.error('Voice message upload failed:', errorMsg);

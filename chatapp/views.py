@@ -292,31 +292,27 @@ def get_new_messages(request, code):
             except:
                 pass
         
-        messages = messages_query.values(
-            'id', 'user_name', 'session_id', 'content', 'message_type', 
-            'audio_file', 'audio_mime_type', 'duration', 'timestamp', 'is_deleted'
-        )
-        
         messages_list = []
-        for msg in messages:
+        for msg_obj in messages_query:
             # Skip deleted messages for other users
-            if msg['is_deleted'] == 'deleted_for_me' and msg['session_id'] != session_id:
+            if msg_obj.is_deleted == 'deleted_for_me' and msg_obj.session_id != session_id:
                 continue
             
             message_obj = {
-                'id': msg['id'],
-                'user_name': msg['user_name'],
-                'content': msg['content'],
-                'message_type': msg['message_type'],
-                'timestamp': msg['timestamp'].isoformat(),
-                'is_sender': msg['session_id'] == session_id,
-                'is_deleted': msg['is_deleted'],
+                'id': msg_obj.id,
+                'user_name': msg_obj.user_name,
+                'content': msg_obj.content,
+                'message_type': msg_obj.message_type,
+                'timestamp': msg_obj.timestamp.isoformat(),
+                'is_sender': msg_obj.session_id == session_id,
+                'is_deleted': msg_obj.is_deleted,
             }
             
-            if msg['message_type'] == 'voice':
-                message_obj['audio_url'] = msg['audio_file']
-                message_obj['audio_mime_type'] = msg['audio_mime_type'] or 'audio/webm'
-                message_obj['duration'] = msg['duration']
+            if msg_obj.message_type == 'voice':
+                # Use .url property to get proper media URL (e.g., /media/voice_messages/file.webm)
+                message_obj['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else ''
+                message_obj['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/webm'
+                message_obj['duration'] = msg_obj.duration
             
             messages_list.append(message_obj)
         
