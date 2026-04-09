@@ -1709,6 +1709,15 @@
                 }
             });
 
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                alert('Group was deleted due to inactivity. Redirecting...');
+                setTimeout(() => { window.location.href = '/chat/'; }, 1000);
+                return;
+            }
+
             const data = await response.json();
             
             if (response.ok && data.success) {
@@ -2020,6 +2029,38 @@
 
         try {
             const response = await fetch(`/group/${groupCode}/get-messages/?since=${encodeURIComponent(lastUpdateTimestamp)}`);
+            
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                
+                // Show error message and redirect
+                const messagesScroll = document.getElementById('messagesScroll');
+                if (messagesScroll) {
+                    messagesScroll.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #d32f2f;">
+                            <h3>Group Deleted</h3>
+                            <p>This group was deleted due to inactivity (${data.reason}).</p>
+                            <p>Redirecting to chat...</p>
+                        </div>
+                    `;
+                }
+                
+                // Clear polling and redirect after 2 seconds
+                clearInterval(pollInterval);
+                setTimeout(() => {
+                    window.location.href = '/chat/';
+                }, 2000);
+                return;
+            }
+            
+            // CHECK: Other errors (404, 500, etc)
+            if (!response.ok) {
+                console.error(`API error: ${response.status} ${response.statusText}`);
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const data = await response.json();
 
             if (data.success && data.messages && data.messages.length > 0) {
@@ -2107,6 +2148,16 @@
                     'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
                 }
             });
+
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                console.warn('Stopping heartbeat and redirecting...');
+                // Group deleted - stop polling and redirect
+                clearInterval(pollInterval);
+                return;  // Stop heartbeat interval
+            }
 
             const data = await response.json();
             if (data.success) {
@@ -2254,6 +2305,16 @@
             }
         })
         .then(response => {
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                return response.json().then(data => {
+                    console.warn('⚠️ Group deleted:', data.reason);
+                    alert('Group was deleted due to inactivity. Redirecting...');
+                    setTimeout(() => { window.location.href = '/chat/'; }, 1000);
+                    throw new Error('GroupDeleted');
+                });
+            }
+            
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -2275,6 +2336,7 @@
             }
         })
         .catch(error => {
+            if (error.message === 'GroupDeleted') return;  // Already handled
             console.error('Fetch error:', error);
             alert('Error sending message: ' + error.message);
         })

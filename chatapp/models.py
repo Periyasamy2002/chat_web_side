@@ -47,11 +47,20 @@ class Group(models.Model):
         from django.utils import timezone
         from datetime import timedelta
         five_min_ago = timezone.now() - timedelta(minutes=5)
-        # Count messages from this group by unique users in last 5 minutes
-        return AnonymousUser.objects.filter(
+        
+        # Get unique session IDs that have messages in this group
+        group_users = self.messages.values_list('session_id', flat=True).distinct()
+        
+        # Count how many of those users are currently online
+        online_in_group = AnonymousUser.objects.filter(
+            session_id__in=group_users,
             is_online=True,
             last_seen__gte=five_min_ago
         ).count()
+        
+        print(f"[GROUP {self.code}] Group online users: {online_in_group} (from {len(group_users)} total users), Age: {(timezone.now() - self.created_at).total_seconds() / 60:.1f} min, Inactivity: {(timezone.now() - self.last_activity).total_seconds() / 60:.1f} min")
+        
+        return online_in_group
 
     def should_auto_delete_empty(self):
         """Check 1: If group is opened with 0 users online"""
@@ -72,32 +81,39 @@ class Group(models.Model):
         return self.last_activity < four_min_ago and self.get_online_count() == 0
 
     def should_auto_delete(self):
-        """Check all auto-delete conditions"""
+        """Check all auto-delete conditions - CONSOLIDATED VERSION"""
         from django.utils import timezone
         from datetime import timedelta
         
-        # Check if migration has been applied (last_activity field exists)
-        if not hasattr(self, 'last_activity'):
-            return False, "missing_last_activity"
-        
         try:
-            online_count = self.get_online_count()
+            # Get group-specific online count
+            online_count = self.get_group_online_count()
+            age_minutes = (timezone.now() - self.created_at).total_seconds() / 60
+            inactivity_minutes = (timezone.now() - self.last_activity).total_seconds() / 60
             
-            # Condition 1: Group is opened with 0 users online
+            # Condition 1: Group opened with 0 users online
             if online_count == 0:
-                # Condition 2: New group with no joins in 5 minutes
-                five_min_ago = timezone.now() - timedelta(minutes=5)
-                if self.created_at < five_min_ago:
+                # Condition 2: New group with no joins in 5 minutes (5+ min old, 0 users)
+                if age_minutes >= 5:
+                    reason = f"new_empty_5min (age={age_minutes:.1f}min, inactivity={inactivity_minutes:.1f}min)"
+                    print(f"[DELETE CHECK] Group {self.code}: DELETE (Condition 2) - {reason}")
                     return True, "new_empty_5min"
                 
-                # Condition 4: All users left, 4+ minutes passed
-                four_min_ago = timezone.now() - timedelta(minutes=4)
-                if self.last_activity < four_min_ago:
+                # Condition 3: All users left for 4+ minutes
+                if inactivity_minutes >= 4:
+                    reason = f"all_left_4min (inactivity={inactivity_minutes:.1f}min)"
+                    print(f"[DELETE CHECK] Group {self.code}: DELETE (Condition 3) - {reason}")
                     return True, "all_left_4min"
+                
+                print(f"[DELETE CHECK] Group {self.code}: KEEP (0 users but too new/fresh: age={age_minutes:.1f}min, inactivity={inactivity_minutes:.1f}min)")
+                return False, "too_new_or_fresh"
             
+            # Group has online users - keep it
+            print(f"[DELETE CHECK] Group {self.code}: KEEP ({online_count} online users)")
             return False, "active"
+        
         except Exception as e:
-            print(f"Error checking auto-delete: {str(e)}")
+            print(f"[DELETE ERROR] Group {self.code}: Error checking auto-delete: {str(e)}")
             return False, "error"
 
 class Message(models.Model):

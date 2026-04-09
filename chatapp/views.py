@@ -3,17 +3,83 @@ from .models import Group, Message, AnonymousUser
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
-from .group_cleanup import (
-    check_group_on_access, cleanup_on_user_join, 
-    cleanup_on_user_leave, update_user_heartbeat,
-    get_group_deletion_status, get_all_groups_cleanup_status,
-    get_group_online_count
-)
+from datetime import timedelta
 import json
 import uuid
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# HELPER FUNCTIONS FOR AUTO-DELETION (CONSOLIDATED)
+# ============================================================================
+
+def check_and_cleanup_group(group):
+    """
+    Check if group should be deleted and perform deletion if needed.
+    Returns: (should_delete: bool, reason: str)
+    """
+    if not group:
+        return False, "group_not_found"
+    
+    try:
+        should_delete, reason = group.should_auto_delete()
+        
+        if should_delete:
+            # Double-check online count before deletion
+            online_count = group.get_group_online_count()
+            print(f"[CLEANUP] Group {group.code}: Final check - {online_count} online users")
+            
+            if online_count == 0:
+                print(f"[DELETE] Group {group.code}: DELETING - Reason: {reason}")
+                group_code = group.code
+                group.delete()
+                return True, reason
+        
+        return False, reason
+    
+    except Exception as e:
+        print(f"[ERROR] check_and_cleanup_group: {str(e)}")
+        return False, "error"
+
+
+def update_user_online_status(session_id, user_name, is_online=True):
+    """Update or create user's online status"""
+    try:
+        anon_user, _ = AnonymousUser.objects.get_or_create(
+            session_id=session_id,
+            defaults={'user_name': user_name, 'is_online': is_online}
+        )
+        anon_user.user_name = user_name
+        anon_user.is_online = is_online
+        anon_user.last_seen = timezone.now()
+        anon_user.save(update_fields=['user_name', 'is_online', 'last_seen'])
+        print(f"[USER] {user_name}: marked {'ONLINE' if is_online else 'OFFLINE'}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] update_user_online_status: {str(e)}")
+        return False
+
+
+def auto_offline_inactive_users():
+    """Mark users as offline if inactive for 5+ minutes"""
+    try:
+        thirty_min_ago = timezone.now() - timedelta(minutes=5)
+        inactive = AnonymousUser.objects.filter(
+            is_online=True,
+            last_seen__lt=thirty_min_ago
+        )
+        
+        for user in inactive:
+            user.is_online = False
+            user.save(update_fields=['is_online'])
+            print(f"[AUTO-OFFLINE] User {user.user_name}: marked offline (inactive {(timezone.now() - user.last_seen).total_seconds() / 60:.0f} min)")
+        
+        return inactive.count()
+    
+    except Exception as e:
+        print(f"[ERROR] auto_offline_inactive_users: {str(e)}")
+        return 0
 
 def home(request):
     """Home page - entry point of the app"""
@@ -60,8 +126,9 @@ def chat(request):
             
             logger.info(f"✓ User '{user_name}' joined group '{code}'")
             
-            # Cleanup on user join: Update last_activity
-            cleanup_on_user_join(group, request.session.session_key)
+            # Update group last_activity on user join
+            group.last_activity = timezone.now()
+            group.save(update_fields=['last_activity'])
         
         except Exception as e:
             logger.error(f"Error creating user record: {str(e)}")
@@ -80,18 +147,12 @@ def group(request, code):
     except Group.DoesNotExist:
         return redirect('chat')
     
-    # Check 1: If group is opened with 0 users, check if should delete
-    online_count = get_group_online_count(group)
-    if online_count == 0:
-        # Double-check deletion conditions before proceeding
-        should_delete, reason = group.should_auto_delete()
-        if should_delete:
-            logger.warning(f"Auto-deleting group '{code}' - reason: {reason}")
-            group_name = group.name
-            group.delete()
-            return render(request, "chat.html", {
-                "info": f"Group '{group_name}' was deleted due to inactivity. Please create a new one!"
-            })
+    # AUTO-DELETE: Check if group should be deleted
+    should_delete, reason = check_and_cleanup_group(group)
+    if should_delete:
+        return render(request, "chat.html", {
+            "info": f"Group was deleted due to inactivity ({reason}). Please create a new one!"
+        })
     
     # Get user name from session
     user_name = request.session.get('user_name', 'Anonymous')
@@ -124,6 +185,17 @@ def upload_voice_message(request, code):
     """Handle voice message uploads with activity tracking"""
     try:
         group = Group.objects.get(code=code)
+        
+        # AUTO-DELETE CHECK: Before processing voice message
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[VOICE_MESSAGE] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
         user_name = request.session.get('user_name', 'Anonymous')
         session_id = request.session.session_key
         
@@ -144,7 +216,8 @@ def upload_voice_message(request, code):
             defaults={'user_name': user_name}
         )
         anon_user.last_seen = timezone.now()
-        anon_user.save(update_fields=['last_seen'])
+        anon_user.is_online = True
+        anon_user.save(update_fields=['last_seen', 'is_online'])
         
         # Create voice message
         message = Message.objects.create(
@@ -157,16 +230,11 @@ def upload_voice_message(request, code):
             session_id=session_id
         )
         
-        # Update group last activity if field exists
-        try:
-            if hasattr(group, 'last_activity'):
-                group.last_activity = timezone.now()
-                group.save(update_fields=['last_activity'])
-        except Exception as e:
-            if 'last_activity' not in str(e):
-                raise
+        # Update group last activity
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
         
-        print(f"✓ Voice message uploaded: {user_name} in group {group.code} (duration: {duration}s)")
+        print(f"[VOICE] {user_name} uploaded voice message in group {group.code} (duration: {duration}s)")
         
         return JsonResponse({
             'success': True,
@@ -176,9 +244,10 @@ def upload_voice_message(request, code):
             'duration': duration
         })
     except Group.DoesNotExist:
-        return JsonResponse({'error': 'Group not found'}, status=404)
+        print(f"[VOICE_MESSAGE] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"Error in upload_voice_message: {str(e)}")
+        print(f"[ERROR] upload_voice_message: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["POST"])
@@ -186,6 +255,17 @@ def delete_message(request, code):
     """Delete a message for me or for everyone"""
     try:
         group = Group.objects.get(code=code)
+        
+        # AUTO-DELETE CHECK: Before processing message deletion
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[DELETE_MESSAGE] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
         message_id = request.POST.get('message_id')
         delete_type = request.POST.get('delete_type')
         session_id = request.session.session_key
@@ -206,17 +286,34 @@ def delete_message(request, code):
             message.is_deleted = 'deleted_for_me'
             message.save()
         
+        print(f"[DELETE_MSG] Message {message_id} marked {delete_type} in group {code}")
+        
         return JsonResponse({'success': True, 'status': message.is_deleted})
+    except Group.DoesNotExist:
+        print(f"[DELETE_MESSAGE] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Message.DoesNotExist:
         return JsonResponse({'error': 'Message not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["POST"])
+@require_http_methods(["POST"])
 def update_user_status(request, code):
     """Update user online/offline status with auto-timeout detection"""
     try:
         group = Group.objects.get(code=code)
+        
+        # AUTO-DELETE CHECK: Before processing status update
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[UPDATE_STATUS] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
         user_name = request.session.get('user_name', 'Anonymous')
         session_id = request.session.session_key
         is_online = request.POST.get('is_online', 'false').lower() == 'true'
@@ -228,38 +325,19 @@ def update_user_status(request, code):
         )
         anon_user.is_online = is_online
         anon_user.last_seen = timezone.now()
-        anon_user.save()
+        anon_user.save(update_fields=['is_online', 'last_seen'])
         
-        # Update group last activity timestamp if field exists
-        try:
-            if hasattr(group, 'last_activity'):
-                group.last_activity = timezone.now()
-                group.save(update_fields=['last_activity'])
-        except Exception as e:
-            if 'last_activity' not in str(e):
-                raise
+        # Update group last activity timestamp
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
         
         # Auto-mark users offline if inactive for 30 minutes
-        # (This is a safety net - frontend should also ping regularly)
-        try:
-            thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
-            inactive_users = AnonymousUser.objects.filter(
-                is_online=True,
-                last_seen__lt=thirty_min_ago
-            )
-            for user in inactive_users:
-                user.is_online = False
-                user.save(update_fields=['is_online'])
-                print(f"Auto-marked user {user.user_name} as offline (inactive for 30+ minutes)")
-        except Exception as e:
-            print(f"Warning: Could not auto-mark users offline: {str(e)}")
+        auto_offline_inactive_users()
         
         # Get updated online count for this group
-        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
-        online_count = AnonymousUser.objects.filter(
-            is_online=True,
-            last_seen__gte=five_min_ago
-        ).count()
+        online_count = group.get_group_online_count()
+        
+        print(f"[STATUS] {user_name}: {'ONLINE' if is_online else 'OFFLINE'} in group {group.code}")
         
         return JsonResponse({
             'success': True,
@@ -267,35 +345,62 @@ def update_user_status(request, code):
             'online_count': online_count
         })
     except Group.DoesNotExist:
-        return JsonResponse({'error': 'Group not found'}, status=404)
+        print(f"[UPDATE_STATUS] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"Error in update_user_status: {str(e)}")
+        print(f"[ERROR] update_user_status: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["GET"])
+@require_http_methods(["GET"])
 def get_online_users(request, code):
-    """Get list of online users"""
+    """Get list of online users in the group"""
     try:
         group = Group.objects.get(code=code)
+        
+        # AUTO-DELETE CHECK: Before returning online users
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[ONLINE_USERS] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
+        # Get users who are members of this group (have messages) and are currently online
+        online_count = group.get_group_online_count()
+        
+        # Get names of these online users
+        group_user_session_ids = group.messages.values_list('session_id', flat=True).distinct()
+        
         online_users = AnonymousUser.objects.filter(
+            session_id__in=group_user_session_ids,
             is_online=True,
             last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
-        ).values_list('user_name', 'id')
+        ).values_list('user_name', 'id', 'session_id').distinct()
         
         users_list = [
             {
                 'id': user[1],
+                'session_id': user[2],
                 'display_name': user[0] or 'Anonymous'
             }
             for user in online_users
         ]
+        
+        print(f"[ONLINE_USERS] Group {code}: {len(users_list)} online users")
         
         return JsonResponse({
             'success': True,
             'users': users_list,
             'count': len(users_list)
         })
+    except Group.DoesNotExist:
+        print(f"[ONLINE_USERS] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
+        print(f"[ERROR] get_online_users: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["GET"])
@@ -305,6 +410,16 @@ def get_new_messages(request, code):
         group = Group.objects.get(code=code)
         session_id = request.session.session_key
         since_timestamp = request.GET.get('since', '')
+        
+        # AUTO-DELETE CHECK: Most frequently called endpoint - check deletion here
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[GET_NEW_MESSAGES] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)  # HTTP 410 Gone - resource no longer exists
         
         # Build query
         messages_query = Message.objects.filter(group=group).order_by('timestamp')
@@ -343,39 +458,11 @@ def get_new_messages(request, code):
             
             messages_list.append(message_obj)
         
-        # Get online count and update last activity
-        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
-        online_count = AnonymousUser.objects.filter(
-            is_online=True,
-            last_seen__gte=five_min_ago
-        ).count()
+        # Get online count for this group
+        online_count = group.get_group_online_count()
         
-        # Auto-delete groups only if migration has been applied
-        try:
-            if hasattr(group, 'last_activity'):
-                thirty_min_ago = timezone.now() - timezone.timedelta(minutes=30)
-                empty_groups = Group.objects.filter(
-                    last_activity__lt=thirty_min_ago
-                ).exclude(messages__isnull=False)
-                
-                deleted_count = 0
-                for empty_group in empty_groups:
-                    # Double-check online count for this specific group
-                    group_online = AnonymousUser.objects.filter(
-                        is_online=True,
-                        last_seen__gte=five_min_ago
-                    ).count()
-                    
-                    if group_online == 0:
-                        print(f"Auto-deleting empty group: {empty_group.code}")
-                        empty_group.delete()
-                        deleted_count += 1
-                
-                if deleted_count > 0:
-                    print(f"Auto-deleted {deleted_count} empty groups")
-        except Exception as e:
-            if 'last_activity' not in str(e):
-                print(f"Warning: Auto-delete check failed: {str(e)}")
+        # Update user's last_seen timestamp (heartbeat)
+        update_user_online_status(session_id, request.session.get('user_name', 'Anonymous'), is_online=True)
         
         return JsonResponse({
             'success': True,
@@ -384,9 +471,10 @@ def get_new_messages(request, code):
             'timestamp': timezone.now().isoformat()
         })
     except Group.DoesNotExist:
-        return JsonResponse({'error': 'Group not found'}, status=404)
+        print(f"[GET_NEW_MESSAGES] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"Error in get_new_messages: {str(e)}")
+        print(f"[ERROR] get_new_messages: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["POST"])
@@ -394,6 +482,17 @@ def send_message_ajax(request, code):
     """Send text message via AJAX - for live updates with activity tracking"""
     try:
         group = Group.objects.get(code=code)
+        
+        # AUTO-DELETE CHECK: Before processing message
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[SEND_MESSAGE] Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
         user_name = request.session.get('user_name', 'Anonymous')
         session_id = request.session.session_key
         content = request.POST.get('message', '').strip()
@@ -411,7 +510,8 @@ def send_message_ajax(request, code):
             defaults={'user_name': user_name}
         )
         anon_user.last_seen = timezone.now()
-        anon_user.save(update_fields=['last_seen'])
+        anon_user.is_online = True
+        anon_user.save(update_fields=['last_seen', 'is_online'])
         
         # Create text message
         message = Message.objects.create(
@@ -422,16 +522,11 @@ def send_message_ajax(request, code):
             session_id=session_id
         )
         
-        # Update group last activity if field exists
-        try:
-            if hasattr(group, 'last_activity'):
-                group.last_activity = timezone.now()
-                group.save(update_fields=['last_activity'])
-        except Exception as e:
-            if 'last_activity' not in str(e):
-                raise
+        # Update group last activity
+        group.last_activity = timezone.now()
+        group.save(update_fields=['last_activity'])
         
-        print(f"✓ Text message sent: {user_name} in group {group.code}")
+        print(f"[MESSAGE] {user_name} sent text message in group {group.code}")
         
         return JsonResponse({
             'success': True,
@@ -445,9 +540,10 @@ def send_message_ajax(request, code):
             }
         })
     except Group.DoesNotExist:
-        return JsonResponse({'error': 'Group not found'}, status=404)
+        print(f"[SEND_MESSAGE] Group {code} not found")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"Error in send_message_ajax: {str(e)}")
+        print(f"[ERROR] send_message_ajax: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 
@@ -459,8 +555,26 @@ def send_message_ajax(request, code):
 def get_group_cleanup_status(request, code):
     """Get deletion status and reason for a specific group (Admin only)"""
     try:
-        status = get_group_deletion_status(code)
-        return JsonResponse(status)
+        group = Group.objects.get(code=code)
+        
+        should_delete, reason = group.should_auto_delete()
+        online_count = group.get_group_online_count()
+        
+        return JsonResponse({
+            'success': True,
+            'group_code': group.code,
+            'group_name': group.name,
+            'created_at': group.created_at.isoformat(),
+            'last_activity': group.last_activity.isoformat(),
+            'age_minutes': (timezone.now() - group.created_at).total_seconds() / 60,
+            'inactivity_minutes': (timezone.now() - group.last_activity).total_seconds() / 60,
+            'online_count': online_count,
+            'total_messages': group.messages.count(),
+            'should_delete': should_delete,
+            'delete_reason': reason
+        })
+    except Group.DoesNotExist:
+        return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
@@ -469,7 +583,29 @@ def get_group_cleanup_status(request, code):
 def get_all_groups_status(request):
     """Get cleanup status for all groups (Admin monitoring)"""
     try:
-        statuses = get_all_groups_cleanup_status()
+        all_groups = Group.objects.all()
+        statuses = []
+        
+        for group in all_groups:
+            should_delete, reason = group.should_auto_delete()
+            online_count = group.get_group_online_count()
+            
+            statuses.append({
+                'group_code': group.code,
+                'group_name': group.name,
+                'created_at': group.created_at.isoformat(),
+                'last_activity': group.last_activity.isoformat(),
+                'age_minutes': (timezone.now() - group.created_at).total_seconds() / 60,
+                'inactivity_minutes': (timezone.now() - group.last_activity).total_seconds() / 60,
+                'online_count': online_count,
+                'total_messages': group.messages.count(),
+                'should_delete': should_delete,
+                'delete_reason': reason
+            })
+        
+        # Sort by should_delete (delete candidates first)
+        statuses.sort(key=lambda x: (not x['should_delete'], x['inactivity_minutes']), reverse=True)
+        
         return JsonResponse({
             'success': True,
             'total_groups': len(statuses),
