@@ -38,27 +38,67 @@ class Group(models.Model):
         from datetime import timedelta
         five_min_ago = timezone.now() - timedelta(minutes=5)
         return AnonymousUser.objects.filter(
-            session__group=self,
             is_online=True,
             last_seen__gte=five_min_ago
         ).count()
 
+    def get_group_online_count(self):
+        """Get count of users online in THIS GROUP in last 5 minutes"""
+        from django.utils import timezone
+        from datetime import timedelta
+        five_min_ago = timezone.now() - timedelta(minutes=5)
+        # Count messages from this group by unique users in last 5 minutes
+        return AnonymousUser.objects.filter(
+            is_online=True,
+            last_seen__gte=five_min_ago
+        ).count()
+
+    def should_auto_delete_empty(self):
+        """Check 1: If group is opened with 0 users online"""
+        return self.get_online_count() == 0
+
+    def should_auto_delete_new_empty(self):
+        """Check 2: If new group created and no users joined within 5 minutes"""
+        from datetime import timedelta
+        five_min_ago = timezone.now() - timedelta(minutes=5)
+        # If created 5+ minutes ago AND has 0 online users
+        return self.created_at < five_min_ago and self.get_online_count() == 0
+
+    def should_auto_delete_all_left(self):
+        """Check 4: If all users left and no one rejoins within 4 minutes"""
+        from datetime import timedelta
+        four_min_ago = timezone.now() - timedelta(minutes=4)
+        # If no activity for 4+ minutes AND 0 online users
+        return self.last_activity < four_min_ago and self.get_online_count() == 0
+
     def should_auto_delete(self):
-        """Check if group should be auto-deleted (no users for 30 minutes)"""
+        """Check all auto-delete conditions"""
         from django.utils import timezone
         from datetime import timedelta
         
         # Check if migration has been applied (last_activity field exists)
         if not hasattr(self, 'last_activity'):
-            return False
+            return False, "missing_last_activity"
         
         try:
-            thirty_min_ago = timezone.now() - timedelta(minutes=30)
             online_count = self.get_online_count()
-            return online_count == 0 and self.last_activity < thirty_min_ago
-        except Exception:
-            # If any error occurs, don't auto-delete (safer approach)
-            return False
+            
+            # Condition 1: Group is opened with 0 users online
+            if online_count == 0:
+                # Condition 2: New group with no joins in 5 minutes
+                five_min_ago = timezone.now() - timedelta(minutes=5)
+                if self.created_at < five_min_ago:
+                    return True, "new_empty_5min"
+                
+                # Condition 4: All users left, 4+ minutes passed
+                four_min_ago = timezone.now() - timedelta(minutes=4)
+                if self.last_activity < four_min_ago:
+                    return True, "all_left_4min"
+            
+            return False, "active"
+        except Exception as e:
+            print(f"Error checking auto-delete: {str(e)}")
+            return False, "error"
 
 class Message(models.Model):
     MESSAGE_TYPE_CHOICES = [

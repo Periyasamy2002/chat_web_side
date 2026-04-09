@@ -3,8 +3,17 @@ from .models import Group, Message, AnonymousUser
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
+from .group_cleanup import (
+    check_group_on_access, cleanup_on_user_join, 
+    cleanup_on_user_leave, update_user_heartbeat,
+    get_group_deletion_status, get_all_groups_cleanup_status,
+    get_group_online_count
+)
 import json
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 def home(request):
     """Home page - entry point of the app"""
@@ -35,7 +44,7 @@ def chat(request):
             # If migration hasn't been applied yet, skip this
             if 'last_activity' not in str(e):
                 raise
-            print(f"Note: last_activity field not yet available. Run: python manage.py migrate")
+            logger.info(f"Note: last_activity field not yet available. Run: python manage.py migrate")
         
         # Create or update anonymous user record and mark online
         try:
@@ -49,9 +58,13 @@ def chat(request):
                 anon_user.last_seen = timezone.now()
                 anon_user.save()
             
-            print(f"✓ User '{user_name}' joined group '{code}'")
+            logger.info(f"✓ User '{user_name}' joined group '{code}'")
+            
+            # Cleanup on user join: Update last_activity
+            cleanup_on_user_join(group, request.session.session_key)
+        
         except Exception as e:
-            print(f"Error creating user record: {str(e)}")
+            logger.error(f"Error creating user record: {str(e)}")
         
         # Add group code to session
         request.session['group_code'] = code
@@ -61,10 +74,24 @@ def chat(request):
     return render(request, "chat.html")
 
 def group(request, code):
+    """Group chat view - with automatic deletion checks"""
     try:
         group = Group.objects.get(code=code)
     except Group.DoesNotExist:
         return redirect('chat')
+    
+    # Check 1: If group is opened with 0 users, check if should delete
+    online_count = get_group_online_count(group)
+    if online_count == 0:
+        # Double-check deletion conditions before proceeding
+        should_delete, reason = group.should_auto_delete()
+        if should_delete:
+            logger.warning(f"Auto-deleting group '{code}' - reason: {reason}")
+            group_name = group.name
+            group.delete()
+            return render(request, "chat.html", {
+                "info": f"Group '{group_name}' was deleted due to inactivity. Please create a new one!"
+            })
     
     # Get user name from session
     user_name = request.session.get('user_name', 'Anonymous')
@@ -421,4 +448,32 @@ def send_message_ajax(request, code):
         return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
         print(f"Error in send_message_ajax: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+# ============================================================================
+# AUTO-DELETION & CLEANUP MONITORING ENDPOINTS
+# ============================================================================
+
+@require_http_methods(["GET"])
+def get_group_cleanup_status(request, code):
+    """Get deletion status and reason for a specific group (Admin only)"""
+    try:
+        status = get_group_deletion_status(code)
+        return JsonResponse(status)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+@require_http_methods(["GET"])
+def get_all_groups_status(request):
+    """Get cleanup status for all groups (Admin monitoring)"""
+    try:
+        statuses = get_all_groups_cleanup_status()
+        return JsonResponse({
+            'success': True,
+            'total_groups': len(statuses),
+            'groups': statuses
+        })
+    except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)

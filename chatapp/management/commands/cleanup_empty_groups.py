@@ -1,53 +1,163 @@
 """
-Django management command to cleanup empty and inactive groups.
-
+Django management command for automatic group cleanup
 Usage: python manage.py cleanup_empty_groups
 
-This command:
-1. Marks users offline if inactive for 30+ minutes
-2. Deletes groups that have been empty for 30+ minutes
-3. Provides status report of cleanup actions
+Features:
+- Deletes groups with 0 users for 5+ minutes (new empty)
+- Deletes groups with all users left for 4+ minutes
+- Shows detailed status reports
+- Supports dry-run mode for testing
 
-Run via cron: */5 * * * * cd /path/to/project && python manage.py cleanup_empty_groups
+Run via cron: */2 * * * * cd /path && python manage.py cleanup_empty_groups
 """
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
 from chatapp.models import Group, AnonymousUser
+from chatapp.group_cleanup import check_and_delete_empty_groups, get_all_groups_cleanup_status
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = 'Cleanup empty groups and auto-offline inactive users'
+    help = 'Automatically delete empty groups based on time and activity conditions'
 
     def add_arguments(self, parser):
+        parser.add_argument(
+            '--status',
+            action='store_true',
+            help='Show cleanup status for all groups without deleting',
+        )
+        parser.add_argument(
+            '--verbose',
+            action='store_true',
+            help='Show detailed deletion information',
+        )
         parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Show what would be deleted without actually deleting',
         )
-        parser.add_argument(
-            '--verbose',
-            action='store_true',
-            help='Show detailed output',
-        )
 
     def handle(self, *args, **options):
-        dry_run = options['dry_run']
-        verbose = options['verbose']
+        if options['status']:
+            self.show_status()
+        elif options['dry_run']:
+            self.dry_run_cleanup()
+        else:
+            self.perform_cleanup(options['verbose'])
 
-        if dry_run:
-            self.stdout.write(self.style.WARNING('Running in DRY RUN mode - no changes will be made'))
+    def show_status(self):
+        """Show cleanup status for all groups"""
+        self.stdout.write(self.style.SUCCESS('\n=== GROUP CLEANUP STATUS ===\n'))
+        
+        statuses = get_all_groups_cleanup_status()
+        
+        if not statuses:
+            self.stdout.write(self.style.WARNING('No groups found'))
+            return
+        
+        for status in statuses:
+            color = self.style.ERROR if status['should_delete'] else self.style.SUCCESS
+            
+            self.stdout.write(color(f"\n📌 Group: {status['code']} ({status['name']})"))
+            self.stdout.write(f"   Created: {status['created_at']}")
+            self.stdout.write(f"   Last Activity: {status['last_activity']}")
+            self.stdout.write(f"   Online Users: {status['online_count']}")
+            self.stdout.write(f"   Age: {status['age_minutes']} minutes")
+            self.stdout.write(f"   Inactivity: {status['inactivity_minutes']} minutes")
+            self.stdout.write(f"   Should Delete: {color(str(status['should_delete']))}")
+            if status['should_delete']:
+                self.stdout.write(color(f"   Reason: {status['delete_reason']}"))
 
-        # Step 1: Auto-mark inactive users as offline
-        self.stdout.write(self.style.SUCCESS('\n=== Step 1: Checking inactive users ==='))
-        self.auto_offline_inactive_users(verbose, dry_run)
+    def dry_run_cleanup(self):
+        """Show what would be deleted without actually deleting"""
+        self.stdout.write(self.style.SUCCESS('\n=== DRY RUN: Groups to be deleted ===\n'))
+        
+        deleted_count = 0
+        
+        try:
+            all_groups = Group.objects.all()
+            
+            for group in all_groups:
+                should_delete, reason = group.should_auto_delete()
+                
+                if should_delete:
+                    online_count = self._get_online_count(group)
+                    
+                    if online_count == 0:
+                        deleted_count += 1
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f"❌ Would delete: {group.code} ({group.name})"
+                            )
+                        )
+                        self.stdout.write(f"   Reason: {reason}")
+                        self.stdout.write(f"   Age: {self._get_age_minutes(group)} minutes")
+                        self.stdout.write(f"   Last Activity: {self._get_inactivity_minutes(group)} minutes ago\n")
+            
+            if deleted_count == 0:
+                self.stdout.write(self.style.SUCCESS('✅ No groups to delete'))
+            else:
+                self.stdout.write(
+                    self.style.WARNING(f'\n❌ Would delete {deleted_count} groups')
+                )
+        
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error: {str(e)}'))
 
-        # Step 2: Delete empty groups
-        self.stdout.write(self.style.SUCCESS('\n=== Step 2: Checking empty groups ==='))
-        self.delete_empty_groups(verbose, dry_run)
+    def perform_cleanup(self, verbose=False):
+        """Perform actual cleanup"""
+        self.stdout.write(self.style.SUCCESS('\n=== RUNNING GROUP CLEANUP ===\n'))
+        
+        try:
+            deleted_count, details = check_and_delete_empty_groups()
+            
+            if deleted_count == 0:
+                self.stdout.write(self.style.SUCCESS('✅ No groups to delete'))
+            else:
+                self.stdout.write(
+                    self.style.SUCCESS(f'\n✅ Deleted {deleted_count} groups:\n')
+                )
+                
+                for detail in details:
+                    self.stdout.write(f"   • {detail['group_code']} ({detail['reason']})")
+                    if verbose:
+                        self.stdout.write(f"     Created: {detail['created_at']}")
+                        self.stdout.write(f"     Deleted: {detail['deleted_at']}\n")
+            
+            self.stdout.write(self.style.SUCCESS('\n=== CLEANUP COMPLETE ===\n'))
+        
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error: {str(e)}'))
 
-        self.stdout.write(self.style.SUCCESS('\n✓ Cleanup completed'))
+    def _get_online_count(self, group):
+        """Helper: Get online count for a group"""
+        five_min_ago = timezone.now() - timedelta(minutes=5)
+        online_users = AnonymousUser.objects.filter(
+            is_online=True,
+            last_seen__gte=five_min_ago
+        )
+        
+        user_ids_in_group = set()
+        for user in online_users:
+            has_message = group.messages.filter(
+                session_id=user.session_id
+            ).exists()
+            if has_message:
+                user_ids_in_group.add(user.session_id)
+        
+        return len(user_ids_in_group)
+
+    def _get_age_minutes(self, group):
+        """Helper: Get group age in minutes"""
+        return round((timezone.now() - group.created_at).total_seconds() / 60, 2)
+
+    def _get_inactivity_minutes(self, group):
+        """Helper: Get inactivity duration in minutes"""
+        return round((timezone.now() - group.last_activity).total_seconds() / 60, 2)
 
     def auto_offline_inactive_users(self, verbose, dry_run):
         """Mark users offline if inactive for 30+ minutes"""
