@@ -4,22 +4,14 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
 from datetime import timedelta
-import json
 import uuid
 import logging
 from .utils.translator import translate_text
 
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# HELPER FUNCTIONS FOR AUTO-DELETION (CONSOLIDATED)
-# ============================================================================
-
 def check_and_cleanup_group(group):
-    """
-    Check if group should be deleted and perform deletion if needed.
-    Returns: (should_delete: bool, reason: str)
-    """
+    """Check if group should be deleted and perform deletion if needed."""
     if not group:
         return False, "group_not_found"
     
@@ -27,20 +19,14 @@ def check_and_cleanup_group(group):
         should_delete, reason = group.should_auto_delete()
         
         if should_delete:
-            # Double-check online count before deletion
             online_count = group.get_group_online_count()
-            print(f"[CLEANUP] Group {group.code}: Final check - {online_count} online users")
-            
             if online_count == 0:
-                print(f"[DELETE] Group {group.code}: DELETING - Reason: {reason}")
-                group_code = group.code
                 group.delete()
                 return True, reason
         
         return False, reason
-    
     except Exception as e:
-        print(f"[ERROR] check_and_cleanup_group: {str(e)}")
+        logger.error(f"check_and_cleanup_group error: {str(e)}")
         return False, "error"
 
 
@@ -55,40 +41,38 @@ def update_user_online_status(session_id, user_name, is_online=True):
         anon_user.is_online = is_online
         anon_user.last_seen = timezone.now()
         anon_user.save(update_fields=['user_name', 'is_online', 'last_seen'])
-        print(f"[USER] {user_name}: marked {'ONLINE' if is_online else 'OFFLINE'}")
         return True
     except Exception as e:
-        print(f"[ERROR] update_user_online_status: {str(e)}")
+        logger.error(f"update_user_online_status error: {str(e)}")
         return False
 
 
 def auto_offline_inactive_users():
     """Mark users as offline if inactive for 5+ minutes"""
     try:
-        thirty_min_ago = timezone.now() - timedelta(minutes=5)
+        five_min_ago = timezone.now() - timedelta(minutes=5)
         inactive = AnonymousUser.objects.filter(
             is_online=True,
-            last_seen__lt=thirty_min_ago
+            last_seen__lt=five_min_ago
         )
         
         for user in inactive:
             user.is_online = False
             user.save(update_fields=['is_online'])
-            print(f"[AUTO-OFFLINE] User {user.user_name}: marked offline (inactive {(timezone.now() - user.last_seen).total_seconds() / 60:.0f} min)")
         
         return inactive.count()
-    
     except Exception as e:
-        print(f"[ERROR] auto_offline_inactive_users: {str(e)}")
+        logger.error(f"auto_offline_inactive_users error: {str(e)}")
         return 0
+
 
 def home(request):
     """Home page - entry point of the app"""
     return render(request, "home.html")
 
+
 def chat(request):
     """Chat page - user enters their name and group code"""
-    
     if request.method == "POST":
         user_name = request.POST.get("user_name", "").strip()
         code = request.POST.get("code", "").strip()
@@ -97,26 +81,19 @@ def chat(request):
         if not user_name or not code:
             return render(request, "chat.html", {"error": "Please enter both name and group code"})
         
-        # Store user name in session
         request.session['user_name'] = user_name
         request.session['user_id'] = request.session.get('user_id') or str(uuid.uuid4())
-        # Store language preference in session
         request.session['language'] = language
         
-        # Get or create group
         group, created = Group.objects.get_or_create(code=code, defaults={"name": code})
         
-        # Update last activity if field exists (after migration)
         try:
             group.last_activity = timezone.now()
             group.save(update_fields=['last_activity'])
         except Exception as e:
-            # If migration hasn't been applied yet, skip this
             if 'last_activity' not in str(e):
                 raise
-            logger.info(f"Note: last_activity field not yet available. Run: python manage.py migrate")
         
-        # Create or update anonymous user record and mark online
         try:
             anon_user, created = AnonymousUser.objects.get_or_create(
                 session_id=request.session.session_key,
@@ -128,21 +105,17 @@ def chat(request):
                 anon_user.last_seen = timezone.now()
                 anon_user.save()
             
-            logger.info(f"✓ User '{user_name}' joined group '{code}' with language preference: {language}")
-            
-            # Update group last_activity on user join
             group.last_activity = timezone.now()
             group.save(update_fields=['last_activity'])
-        
+            logger.info(f"User '{user_name}' joined group '{code}' with language: {language}")
         except Exception as e:
             logger.error(f"Error creating user record: {str(e)}")
         
-        # Add group code to session
         request.session['group_code'] = code
-        
         return redirect("group", code=group.code)
 
     return render(request, "chat.html")
+
 
 def group(request, code):
     """Group chat view - with automatic deletion checks"""
@@ -151,29 +124,21 @@ def group(request, code):
     except Group.DoesNotExist:
         return redirect('chat')
     
-    # AUTO-DELETE: Check if group should be deleted
     should_delete, reason = check_and_cleanup_group(group)
     if should_delete:
         return render(request, "chat.html", {
             "info": f"Group was deleted due to inactivity ({reason}). Please create a new one!"
         })
     
-    # Get user name from session
     user_name = request.session.get('user_name', 'Anonymous')
-    session_id = request.session.session_key
-    
-    # Get user's language preference from session (default to English)
     user_language = request.session.get('language', 'English')
     
-    # Get all messages
     messages_list = Message.objects.filter(group=group).order_by('timestamp')
     
-    # Get online users in this group
     online_users = AnonymousUser.objects.filter(
         last_seen__gte=timezone.now() - timezone.timedelta(minutes=5)
     ).distinct()
     
-    # Get last message timestamp for live updates
     last_message = messages_list.order_by('-timestamp').first()
     last_message_timestamp = last_message.timestamp.isoformat() if last_message else timezone.now().isoformat()
     
@@ -183,11 +148,12 @@ def group(request, code):
         "user_name": user_name,
         "online_count": online_users.count(),
         "last_message_timestamp": last_message_timestamp,
-        "language": user_language,  # Language code for JavaScript
-        "language_name": user_language,  # Readable language name for display
+        "language": user_language,
+        "language_name": user_language,
     }
     
     return render(request, "group.html", context)
+
 
 @require_http_methods(["POST"])
 def upload_voice_message(request, code):
@@ -195,10 +161,8 @@ def upload_voice_message(request, code):
     try:
         group = Group.objects.get(code=code)
         
-        # AUTO-DELETE CHECK: Before processing voice message
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[VOICE_MESSAGE] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
@@ -215,11 +179,9 @@ def upload_voice_message(request, code):
         duration = float(request.POST.get('duration', 0))
         audio_mime_type = request.POST.get('audio_mime_type', 'audio/webm')
         
-        # Validate file size (max 50MB)
         if audio_file.size > 50 * 1024 * 1024:
             return JsonResponse({'error': 'Audio file too large (max 50MB)'}, status=400)
         
-        # Create or update anonymous user
         anon_user, _ = AnonymousUser.objects.get_or_create(
             session_id=session_id,
             defaults={'user_name': user_name}
@@ -228,7 +190,6 @@ def upload_voice_message(request, code):
         anon_user.is_online = True
         anon_user.save(update_fields=['last_seen', 'is_online'])
         
-        # Create voice message
         message = Message.objects.create(
             group=group,
             audio_file=audio_file,
@@ -239,11 +200,8 @@ def upload_voice_message(request, code):
             session_id=session_id
         )
         
-        # Update group last activity
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
-        
-        print(f"[VOICE] {user_name} uploaded voice message in group {group.code} (duration: {duration}s)")
         
         return JsonResponse({
             'success': True,
@@ -253,11 +211,11 @@ def upload_voice_message(request, code):
             'duration': duration
         })
     except Group.DoesNotExist:
-        print(f"[VOICE_MESSAGE] Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[ERROR] upload_voice_message: {str(e)}")
+        logger.error(f"upload_voice_message error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
+
 
 @require_http_methods(["POST"])
 def delete_message(request, code):
@@ -265,10 +223,8 @@ def delete_message(request, code):
     try:
         group = Group.objects.get(code=code)
         
-        # AUTO-DELETE CHECK: Before processing message deletion
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[DELETE_MESSAGE] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
@@ -284,39 +240,34 @@ def delete_message(request, code):
         
         message = Message.objects.get(id=message_id, group=group)
         
-        # Only sender (same session) can delete for everyone
         if delete_type == 'for_all' and message.session_id != session_id:
             return JsonResponse({'error': 'Only sender can delete for everyone'}, status=403)
         
         if delete_type == 'for_all':
             message.is_deleted = 'deleted_for_all'
-            message.save()
         elif delete_type == 'for_me':
             message.is_deleted = 'deleted_for_me'
-            message.save()
         
-        print(f"[DELETE_MSG] Message {message_id} marked {delete_type} in group {code}")
+        message.save()
         
         return JsonResponse({'success': True, 'status': message.is_deleted})
     except Group.DoesNotExist:
-        print(f"[DELETE_MESSAGE] Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Message.DoesNotExist:
         return JsonResponse({'error': 'Message not found'}, status=404)
     except Exception as e:
+        logger.error(f"delete_message error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
-@require_http_methods(["POST"])
+
 @require_http_methods(["POST"])
 def update_user_status(request, code):
     """Update user online/offline status with auto-timeout detection"""
     try:
         group = Group.objects.get(code=code)
         
-        # AUTO-DELETE CHECK: Before processing status update
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[UPDATE_STATUS] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
@@ -327,7 +278,6 @@ def update_user_status(request, code):
         session_id = request.session.session_key
         is_online = request.POST.get('is_online', 'false').lower() == 'true'
         
-        # Update or create anonymous user record
         anon_user, _ = AnonymousUser.objects.get_or_create(
             session_id=session_id,
             defaults={'user_name': user_name}
@@ -336,17 +286,12 @@ def update_user_status(request, code):
         anon_user.last_seen = timezone.now()
         anon_user.save(update_fields=['is_online', 'last_seen'])
         
-        # Update group last activity timestamp
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
         
-        # Auto-mark users offline if inactive for 30 minutes
         auto_offline_inactive_users()
         
-        # Get updated online count for this group
         online_count = group.get_group_online_count()
-        
-        print(f"[STATUS] {user_name}: {'ONLINE' if is_online else 'OFFLINE'} in group {group.code}")
         
         return JsonResponse({
             'success': True,
@@ -354,33 +299,27 @@ def update_user_status(request, code):
             'online_count': online_count
         })
     except Group.DoesNotExist:
-        print(f"[UPDATE_STATUS] Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[ERROR] update_user_status: {str(e)}")
+        logger.error(f"update_user_status error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
-@require_http_methods(["GET"])
+
 @require_http_methods(["GET"])
 def get_online_users(request, code):
     """Get list of online users in the group"""
     try:
         group = Group.objects.get(code=code)
         
-        # AUTO-DELETE CHECK: Before returning online users
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[ONLINE_USERS] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
                 'reason': delete_reason
             }, status=410)
         
-        # Get users who are members of this group (have messages) and are currently online
         online_count = group.get_group_online_count()
-        
-        # Get names of these online users
         group_user_session_ids = group.messages.values_list('session_id', flat=True).distinct()
         
         online_users = AnonymousUser.objects.filter(
@@ -398,53 +337,37 @@ def get_online_users(request, code):
             for user in online_users
         ]
         
-        print(f"[ONLINE_USERS] Group {code}: {len(users_list)} online users")
-        
         return JsonResponse({
             'success': True,
             'users': users_list,
             'count': len(users_list)
         })
     except Group.DoesNotExist:
-        print(f"[ONLINE_USERS] Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[ERROR] get_online_users: {str(e)}")
+        logger.error(f"get_online_users error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
-@require_http_methods(["GET"])
+
 def get_message_by_user_language(message, user_language):
-    """
-    Get appropriate message content based on user's language preference.
-    
-    Returns:
-    - If user prefers English: return original content
-    - If user prefers other language:
-      - If translation exists in that language: return translation
-      - Otherwise: translate on-the-fly and return
-    """
+    """Get message content based on user's language preference"""
     try:
-        # If user prefers English or no language specified, return original
         if not user_language or user_language.lower() == 'english':
             return message.content, 'original'
         
-        # Check if we have a translation in this language
         if (message.translated_content and 
             message.translated_language and 
             message.translated_language.lower() == user_language.lower()):
             return message.translated_content, 'cached'
         
-        # Need to translate on-the-fly
         if message.message_type == 'text' and message.content:
             success, translated_text, msg_text = translate_text(message.content, user_language)
             if success and translated_text:
                 return translated_text, 'translated'
         
-        # If translation failed, return original
         return message.content, 'original'
-    
     except Exception as e:
-        print(f"[GET_MESSAGE] Translation error (returning original): {str(e)}")
+        logger.error(f"get_message_by_user_language error: {str(e)}")
         return message.content, 'original'
 
 
@@ -455,46 +378,33 @@ def get_new_messages(request, code):
         group = Group.objects.get(code=code)
         session_id = request.session.session_key
         since_timestamp = request.GET.get('since', '')
-        
-        # Get user's language preference
         user_language = request.session.get('language', 'English')
-        print(f"[GET_NEW_MESSAGES] Fetching messages for user with language: {user_language}")
-        print(f"[GET_NEW_MESSAGES] Since timestamp: {since_timestamp}")
         
-        # AUTO-DELETE CHECK: Most frequently called endpoint - check deletion here
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[GET_NEW_MESSAGES] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
                 'reason': delete_reason
-            }, status=410)  # HTTP 410 Gone - resource no longer exists
+            }, status=410)
         
-        # Build query
         messages_query = Message.objects.filter(group=group).order_by('timestamp')
         
-        # Filter by timestamp if provided
         if since_timestamp:
             try:
                 from django.utils.dateparse import parse_datetime
                 since_dt = parse_datetime(since_timestamp)
-                print(f"[GET_NEW_MESSAGES] Parsed datetime: {since_dt}")
                 if since_dt:
                     messages_query = messages_query.filter(timestamp__gt=since_dt)
-                    print(f"[GET_NEW_MESSAGES] Filtering messages since: {since_dt}")
-            except Exception as parse_error:
-                print(f"[GET_NEW_MESSAGES] Error parsing datetime: {parse_error}")
+            except Exception:
                 pass
         
         messages_list = []
         for msg_obj in messages_query:
-            # Skip deleted messages for other users
             if msg_obj.is_deleted == 'deleted_for_me' and msg_obj.session_id != session_id:
                 continue
             
             try:
-                # Get content in user's language
                 display_content, translation_source = get_message_by_user_language(msg_obj, user_language)
                 
                 message_obj = {
@@ -510,22 +420,16 @@ def get_new_messages(request, code):
                 }
                 
                 if msg_obj.message_type == 'voice':
-                    # Use .url property to get proper media URL (e.g., /media/voice_messages/file.webm)
                     message_obj['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else ''
                     message_obj['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/webm'
                     message_obj['duration'] = msg_obj.duration
                 
                 messages_list.append(message_obj)
             except Exception as msg_error:
-                print(f"[GET_NEW_MESSAGES] Error processing message {msg_obj.id}: {msg_error}")
+                logger.error(f"Error processing message {msg_obj.id}: {msg_error}")
                 continue
         
-        print(f"[GET_NEW_MESSAGES] Returning {len(messages_list)} messages")
-        
-        # Get online count for this group
         online_count = group.get_group_online_count()
-        
-        # Update user's last_seen timestamp (heartbeat)
         update_user_online_status(session_id, request.session.get('user_name', 'Anonymous'), is_online=True)
         
         return JsonResponse({
@@ -535,31 +439,20 @@ def get_new_messages(request, code):
             'timestamp': timezone.now().isoformat()
         })
     except Group.DoesNotExist:
-        print(f"[GET_NEW_MESSAGES] Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'success': False, 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[ERROR] get_new_messages: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
+        logger.error(f"get_new_messages error: {str(e)}")
         return JsonResponse({'error': str(e), 'success': False}, status=500)
+
 
 @require_http_methods(["POST"])
 def send_message_ajax(request, code):
     """Send text message via AJAX - for live updates with activity tracking"""
     try:
-        print(f"\n[SEND_MESSAGE_AJAX] ===== REQUEST START =====")
-        print(f"[SEND_MESSAGE_AJAX] Group code: {code}")
-        print(f"[SEND_MESSAGE_AJAX] Request method: {request.method}")
-        print(f"[SEND_MESSAGE_AJAX] POST data keys: {list(request.POST.keys())}")
-        print(f"[SEND_MESSAGE_AJAX] POST data: {dict(request.POST)}")
-        
         group = Group.objects.get(code=code)
-        print(f"[SEND_MESSAGE_AJAX] Group found: {group.code}")
         
-        # AUTO-DELETE CHECK: Before processing message
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[SEND_MESSAGE] Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
@@ -570,21 +463,12 @@ def send_message_ajax(request, code):
         session_id = request.session.session_key
         content = request.POST.get('message', '').strip()
         
-        print(f"[SEND_MESSAGE_AJAX] User: {user_name}")
-        print(f"[SEND_MESSAGE_AJAX] Session ID: {session_id}")
-        print(f"[SEND_MESSAGE_AJAX] Content length: {len(content)}")
-        print(f"[SEND_MESSAGE_AJAX] Content: {content[:100]}")
-        
         if not content:
-            print(f"[SEND_MESSAGE_AJAX] ERROR: Empty message")
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
         
-        # Validate message length
         if len(content) > 5000:
-            print(f"[SEND_MESSAGE_AJAX] ERROR: Message too long")
             return JsonResponse({'error': 'Message too long (max 5000 characters)'}, status=400)
         
-        # Create or update anonymous user
         anon_user, created = AnonymousUser.objects.get_or_create(
             session_id=session_id,
             defaults={'user_name': user_name}
@@ -592,9 +476,7 @@ def send_message_ajax(request, code):
         anon_user.last_seen = timezone.now()
         anon_user.is_online = True
         anon_user.save(update_fields=['last_seen', 'is_online'])
-        print(f"[SEND_MESSAGE_AJAX] User status updated (created={created})")
         
-        # Create text message
         message = Message.objects.create(
             group=group,
             content=content,
@@ -602,40 +484,20 @@ def send_message_ajax(request, code):
             user_name=user_name,
             session_id=session_id
         )
-        print(f"[SEND_MESSAGE_AJAX] Message created: ID={message.id}")
         
-        # Update group last activity
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
-        print(f"[SEND_MESSAGE_AJAX] Group activity updated")
         
-        # Try to translate message if user has a language preference (non-English)
-        # This runs AFTER message saving, so translation failure doesn't block message
-        translated_content = None
         try:
             user_language = request.session.get('language', 'English').strip()
             if user_language and user_language.lower() != 'english':
-                print(f"[SEND_MESSAGE_AJAX] Attempting translation to {user_language}")
-                from .utils.translator import translate_text
-                
                 success, translated_text, msg = translate_text(content, user_language)
                 if success and translated_text:
                     message.translated_content = translated_text
                     message.translated_language = user_language
                     message.save(update_fields=['translated_content', 'translated_language'])
-                    translated_content = translated_text
-                    print(f"[SEND_MESSAGE_AJAX] ✓ Translation successful to {user_language}: stored {len(translated_text)} chars")
-                else:
-                    print(f"[SEND_MESSAGE_AJAX] Translation skipped: {msg}")
-            else:
-                print(f"[SEND_MESSAGE_AJAX] No translation needed (user language: {user_language})")
         except Exception as e:
-            # Important: Don't fail the message save if translation fails
-            print(f"[SEND_MESSAGE_AJAX] Translation error (non-blocking): {type(e).__name__}: {str(e)}")
-            # Message is already saved, so we can continue
-        
-        print(f"[SEND_MESSAGE_AJAX] ✓ SUCCESS - Message sent")
-        print(f"[SEND_MESSAGE_AJAX] ===== REQUEST END =====\n")
+            logger.error(f"Translation error (non-blocking): {str(e)}")
         
         return JsonResponse({
             'success': True,
@@ -650,22 +512,15 @@ def send_message_ajax(request, code):
             }
         })
     except Group.DoesNotExist:
-        print(f"[SEND_MESSAGE_AJAX] ERROR: Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[SEND_MESSAGE_AJAX] ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
+        logger.error(f"send_message_ajax error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 
-# ============================================================================
-# AUTO-DELETION & CLEANUP MONITORING ENDPOINTS
-# ============================================================================
-
 @require_http_methods(["GET"])
 def get_group_cleanup_status(request, code):
-    """Get deletion status and reason for a specific group (Admin only)"""
+    """Get deletion status and reason for a specific group"""
     try:
         group = Group.objects.get(code=code)
         
@@ -688,12 +543,13 @@ def get_group_cleanup_status(request, code):
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found'}, status=404)
     except Exception as e:
+        logger.error(f"get_group_cleanup_status error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
 
 @require_http_methods(["GET"])
 def get_all_groups_status(request):
-    """Get cleanup status for all groups (Admin monitoring)"""
+    """Get cleanup status for all groups"""
     try:
         all_groups = Group.objects.all()
         statuses = []
@@ -715,7 +571,6 @@ def get_all_groups_status(request):
                 'delete_reason': reason
             })
         
-        # Sort by should_delete (delete candidates first)
         statuses.sort(key=lambda x: (not x['should_delete'], x['inactivity_minutes']), reverse=True)
         
         return JsonResponse({
@@ -724,68 +579,41 @@ def get_all_groups_status(request):
             'groups': statuses
         })
     except Exception as e:
+        logger.error(f"get_all_groups_status error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=400)
 
-
-# ============================================================================
-# TRANSLATION ENDPOINT
-# ============================================================================
 
 @require_http_methods(["POST"])
 def translate_message(request, code):
     """Translate a message to user's selected language using Gemini API"""
-    print(f"\n[TRANSLATE_ENDPOINT] === TRANSLATION REQUEST STARTED ===")
-    print(f"[TRANSLATE_ENDPOINT] Group code: {code}")
-    print(f"[TRANSLATE_ENDPOINT] Method: {request.method}")
-    print(f"[TRANSLATE_ENDPOINT] POST data: {request.POST}")
-    
     try:
-        # Get group
-        print(f"[TRANSLATE_ENDPOINT] Looking up group...")
         group = Group.objects.get(code=code)
-        print(f"[TRANSLATE_ENDPOINT] ✓ Group found: {group.name}")
         
-        # AUTO-DELETE CHECK
         should_delete, delete_reason = check_and_cleanup_group(group)
         if should_delete:
-            print(f"[TRANSLATE_ENDPOINT] ✗ Group {code} deleted - returning 410 Gone")
             return JsonResponse({
                 'error': 'Group deleted',
                 'status': 'group_deleted',
                 'reason': delete_reason
             }, status=410)
         
-        # Get translation parameters
         text = request.POST.get('text', '').strip()
         target_language = request.POST.get('language', 'English').strip()
         
-        print(f"[TRANSLATE_ENDPOINT] Text to translate: '{text[:50] if text else 'EMPTY'}'")
-        print(f"[TRANSLATE_ENDPOINT] Target language: {target_language}")
-        
         if not text:
-            print(f"[TRANSLATE_ENDPOINT] ✗ No text provided")
             return JsonResponse({'error': 'No text provided'}, status=400)
         
         if not target_language:
-            print(f"[TRANSLATE_ENDPOINT] ✗ No target language specified")
             return JsonResponse({'error': 'No target language specified'}, status=400)
         
-        # Perform translation using Gemini API
-        print(f"[TRANSLATE_ENDPOINT] Calling translate_text() function...")
         success, translated_text, message = translate_text(text, target_language)
-        print(f"[TRANSLATE_ENDPOINT] translate_text() returned: success={success}, message='{message}'")
         
         if not success:
-            print(f"[TRANSLATE_ENDPOINT] ✗ Translation failed: {message}")
             return JsonResponse({
                 'success': False,
                 'error': message,
-                'translated': text  # Return original if translation fails
+                'translated': text
             }, status=400)
-        
-        print(f"[TRANSLATE_ENDPOINT] ✓ Translated to {target_language}")
-        print(f"[TRANSLATE_ENDPOINT] Original: '{text[:50] if text else ''}'")
-        print(f"[TRANSLATE_ENDPOINT] Translated: '{translated_text[:50] if translated_text else ''}'")
         
         return JsonResponse({
             'success': True,
@@ -795,12 +623,7 @@ def translate_message(request, code):
         })
         
     except Group.DoesNotExist:
-        print(f"[TRANSLATE_ENDPOINT] ✗ Group {code} not found (DoesNotExist)")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[TRANSLATE_ENDPOINT] ✗ EXCEPTION OCCURRED")
-        print(f"[TRANSLATE_ENDPOINT] Exception type: {type(e).__name__}")
-        print(f"[TRANSLATE_ENDPOINT] Exception message: {str(e)}")
-        import traceback
-        print(f"[TRANSLATE_ENDPOINT] Traceback:\n{traceback.format_exc()}")
+        logger.error(f"translate_message error: {str(e)}")
         return JsonResponse({'error': f'Translation error: {str(e)}'}, status=400)
