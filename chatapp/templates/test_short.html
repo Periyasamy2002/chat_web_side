@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Short Messages</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        input, button { padding: 8px; margin: 5px; }
+        .result { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Test Short Message Sending</h1>
+    
+    <div>
+        <h2>Test sending "hi" directly to backend</h2>
+        <input type="text" id="messageInput" placeholder="Enter message" value="hi">
+        <button onclick="testSendMessage()">Send Test Message</button>
+    </div>
+    
+    <div id="result" class="result" style="display:none;"></div>
+    
+    <script>
+        function testSendMessage() {
+            const message = document.getElementById('messageInput').value;
+            const resultDiv = document.getElementById('result');
+            
+            console.log('Sending message:', message);
+            
+            const formData = new FormData();
+            formData.append('message', message);
+            
+            // Try to get CSRF token from Django's format
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || 'no-csrf';
+            
+            fetch('/group/TESTGROUP/send-message/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => {
+                console.log('Status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response:', data);
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<strong>Success!</strong><pre>${JSON.stringify(data, null, 2)}</pre>`;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<strong>Error:</strong><pre>${error.message}</pre>`;
+            });
+        }
+    </script>
+</body>
+</html>

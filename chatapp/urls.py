@@ -11,6 +11,7 @@ urlpatterns = [
     path("group/<str:code>/online-users/", views.get_online_users, name="get_online_users"),
     path("group/<str:code>/get-messages/", views.get_new_messages, name="get_messages"),
     path("group/<str:code>/send-message/", views.send_message_ajax, name="send_message_ajax"),
+    path("group/<str:code>/translate/", views.translate_message, name="translate_message"),
     # Auto-deletion & cleanup monitoring
     path("group/<str:code>/cleanup-status/", views.get_group_cleanup_status, name="cleanup_status"),
     path("admin/groups-status/", views.get_all_groups_status, name="all_groups_status"),

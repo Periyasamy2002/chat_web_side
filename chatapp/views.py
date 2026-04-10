@@ -7,6 +7,7 @@ from datetime import timedelta
 import json
 import uuid
 import logging
+from .utils.translator import translate_text
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ def chat(request):
     if request.method == "POST":
         user_name = request.POST.get("user_name", "").strip()
         code = request.POST.get("code", "").strip()
+        language = request.POST.get("language", "English").strip()
         
         if not user_name or not code:
             return render(request, "chat.html", {"error": "Please enter both name and group code"})
@@ -98,6 +100,8 @@ def chat(request):
         # Store user name in session
         request.session['user_name'] = user_name
         request.session['user_id'] = request.session.get('user_id') or str(uuid.uuid4())
+        # Store language preference in session
+        request.session['language'] = language
         
         # Get or create group
         group, created = Group.objects.get_or_create(code=code, defaults={"name": code})
@@ -124,7 +128,7 @@ def chat(request):
                 anon_user.last_seen = timezone.now()
                 anon_user.save()
             
-            logger.info(f"✓ User '{user_name}' joined group '{code}'")
+            logger.info(f"✓ User '{user_name}' joined group '{code}' with language preference: {language}")
             
             # Update group last_activity on user join
             group.last_activity = timezone.now()
@@ -158,6 +162,9 @@ def group(request, code):
     user_name = request.session.get('user_name', 'Anonymous')
     session_id = request.session.session_key
     
+    # Get user's language preference from session (default to English)
+    user_language = request.session.get('language', 'English')
+    
     # Get all messages
     messages_list = Message.objects.filter(group=group).order_by('timestamp')
     
@@ -176,6 +183,8 @@ def group(request, code):
         "user_name": user_name,
         "online_count": online_users.count(),
         "last_message_timestamp": last_message_timestamp,
+        "language": user_language,  # Language code for JavaScript
+        "language_name": user_language,  # Readable language name for display
     }
     
     return render(request, "group.html", context)
@@ -404,12 +413,53 @@ def get_online_users(request, code):
         return JsonResponse({'error': str(e)}, status=400)
 
 @require_http_methods(["GET"])
+def get_message_by_user_language(message, user_language):
+    """
+    Get appropriate message content based on user's language preference.
+    
+    Returns:
+    - If user prefers English: return original content
+    - If user prefers other language:
+      - If translation exists in that language: return translation
+      - Otherwise: translate on-the-fly and return
+    """
+    try:
+        # If user prefers English or no language specified, return original
+        if not user_language or user_language.lower() == 'english':
+            return message.content, 'original'
+        
+        # Check if we have a translation in this language
+        if (message.translated_content and 
+            message.translated_language and 
+            message.translated_language.lower() == user_language.lower()):
+            return message.translated_content, 'cached'
+        
+        # Need to translate on-the-fly
+        if message.message_type == 'text' and message.content:
+            success, translated_text, msg_text = translate_text(message.content, user_language)
+            if success and translated_text:
+                return translated_text, 'translated'
+        
+        # If translation failed, return original
+        return message.content, 'original'
+    
+    except Exception as e:
+        print(f"[GET_MESSAGE] Translation error (returning original): {str(e)}")
+        return message.content, 'original'
+
+
+@require_http_methods(["GET"])
 def get_new_messages(request, code):
-    """Get new messages since last timestamp - for live updates"""
+    """Get new messages since last timestamp - for live updates with multi-language support"""
     try:
         group = Group.objects.get(code=code)
         session_id = request.session.session_key
         since_timestamp = request.GET.get('since', '')
+        
+        # Get user's language preference
+        user_language = request.session.get('language', 'English')
+        print(f"[GET_NEW_MESSAGES] Fetching messages for user with language: {user_language}")
+        print(f"[GET_NEW_MESSAGES] Since timestamp: {since_timestamp}")
         
         # AUTO-DELETE CHECK: Most frequently called endpoint - check deletion here
         should_delete, delete_reason = check_and_cleanup_group(group)
@@ -429,9 +479,12 @@ def get_new_messages(request, code):
             try:
                 from django.utils.dateparse import parse_datetime
                 since_dt = parse_datetime(since_timestamp)
+                print(f"[GET_NEW_MESSAGES] Parsed datetime: {since_dt}")
                 if since_dt:
                     messages_query = messages_query.filter(timestamp__gt=since_dt)
-            except:
+                    print(f"[GET_NEW_MESSAGES] Filtering messages since: {since_dt}")
+            except Exception as parse_error:
+                print(f"[GET_NEW_MESSAGES] Error parsing datetime: {parse_error}")
                 pass
         
         messages_list = []
@@ -440,23 +493,34 @@ def get_new_messages(request, code):
             if msg_obj.is_deleted == 'deleted_for_me' and msg_obj.session_id != session_id:
                 continue
             
-            message_obj = {
-                'id': msg_obj.id,
-                'user_name': msg_obj.user_name,
-                'content': msg_obj.content,
-                'message_type': msg_obj.message_type,
-                'timestamp': msg_obj.timestamp.isoformat(),
-                'is_sender': msg_obj.session_id == session_id,
-                'is_deleted': msg_obj.is_deleted,
-            }
-            
-            if msg_obj.message_type == 'voice':
-                # Use .url property to get proper media URL (e.g., /media/voice_messages/file.webm)
-                message_obj['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else ''
-                message_obj['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/webm'
-                message_obj['duration'] = msg_obj.duration
-            
-            messages_list.append(message_obj)
+            try:
+                # Get content in user's language
+                display_content, translation_source = get_message_by_user_language(msg_obj, user_language)
+                
+                message_obj = {
+                    'id': msg_obj.id,
+                    'user_name': msg_obj.user_name,
+                    'content': display_content,
+                    'original_content': msg_obj.content,
+                    'message_type': msg_obj.message_type,
+                    'timestamp': msg_obj.timestamp.isoformat(),
+                    'is_sender': msg_obj.session_id == session_id,
+                    'is_deleted': msg_obj.is_deleted,
+                    'translation_source': translation_source,
+                }
+                
+                if msg_obj.message_type == 'voice':
+                    # Use .url property to get proper media URL (e.g., /media/voice_messages/file.webm)
+                    message_obj['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else ''
+                    message_obj['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/webm'
+                    message_obj['duration'] = msg_obj.duration
+                
+                messages_list.append(message_obj)
+            except Exception as msg_error:
+                print(f"[GET_NEW_MESSAGES] Error processing message {msg_obj.id}: {msg_error}")
+                continue
+        
+        print(f"[GET_NEW_MESSAGES] Returning {len(messages_list)} messages")
         
         # Get online count for this group
         online_count = group.get_group_online_count()
@@ -472,16 +536,25 @@ def get_new_messages(request, code):
         })
     except Group.DoesNotExist:
         print(f"[GET_NEW_MESSAGES] Group {code} not found")
-        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
+        return JsonResponse({'error': 'Group not found', 'success': False, 'status': 'group_not_found'}, status=404)
     except Exception as e:
         print(f"[ERROR] get_new_messages: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=400)
+        import traceback
+        print(traceback.format_exc())
+        return JsonResponse({'error': str(e), 'success': False}, status=500)
 
 @require_http_methods(["POST"])
 def send_message_ajax(request, code):
     """Send text message via AJAX - for live updates with activity tracking"""
     try:
+        print(f"\n[SEND_MESSAGE_AJAX] ===== REQUEST START =====")
+        print(f"[SEND_MESSAGE_AJAX] Group code: {code}")
+        print(f"[SEND_MESSAGE_AJAX] Request method: {request.method}")
+        print(f"[SEND_MESSAGE_AJAX] POST data keys: {list(request.POST.keys())}")
+        print(f"[SEND_MESSAGE_AJAX] POST data: {dict(request.POST)}")
+        
         group = Group.objects.get(code=code)
+        print(f"[SEND_MESSAGE_AJAX] Group found: {group.code}")
         
         # AUTO-DELETE CHECK: Before processing message
         should_delete, delete_reason = check_and_cleanup_group(group)
@@ -497,21 +570,29 @@ def send_message_ajax(request, code):
         session_id = request.session.session_key
         content = request.POST.get('message', '').strip()
         
+        print(f"[SEND_MESSAGE_AJAX] User: {user_name}")
+        print(f"[SEND_MESSAGE_AJAX] Session ID: {session_id}")
+        print(f"[SEND_MESSAGE_AJAX] Content length: {len(content)}")
+        print(f"[SEND_MESSAGE_AJAX] Content: {content[:100]}")
+        
         if not content:
+            print(f"[SEND_MESSAGE_AJAX] ERROR: Empty message")
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
         
         # Validate message length
         if len(content) > 5000:
+            print(f"[SEND_MESSAGE_AJAX] ERROR: Message too long")
             return JsonResponse({'error': 'Message too long (max 5000 characters)'}, status=400)
         
         # Create or update anonymous user
-        anon_user, _ = AnonymousUser.objects.get_or_create(
+        anon_user, created = AnonymousUser.objects.get_or_create(
             session_id=session_id,
             defaults={'user_name': user_name}
         )
         anon_user.last_seen = timezone.now()
         anon_user.is_online = True
         anon_user.save(update_fields=['last_seen', 'is_online'])
+        print(f"[SEND_MESSAGE_AJAX] User status updated (created={created})")
         
         # Create text message
         message = Message.objects.create(
@@ -521,12 +602,40 @@ def send_message_ajax(request, code):
             user_name=user_name,
             session_id=session_id
         )
+        print(f"[SEND_MESSAGE_AJAX] Message created: ID={message.id}")
         
         # Update group last activity
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
+        print(f"[SEND_MESSAGE_AJAX] Group activity updated")
         
-        print(f"[MESSAGE] {user_name} sent text message in group {group.code}")
+        # Try to translate message if user has a language preference (non-English)
+        # This runs AFTER message saving, so translation failure doesn't block message
+        translated_content = None
+        try:
+            user_language = request.session.get('language', 'English').strip()
+            if user_language and user_language.lower() != 'english':
+                print(f"[SEND_MESSAGE_AJAX] Attempting translation to {user_language}")
+                from .utils.translator import translate_text
+                
+                success, translated_text, msg = translate_text(content, user_language)
+                if success and translated_text:
+                    message.translated_content = translated_text
+                    message.translated_language = user_language
+                    message.save(update_fields=['translated_content', 'translated_language'])
+                    translated_content = translated_text
+                    print(f"[SEND_MESSAGE_AJAX] ✓ Translation successful to {user_language}: stored {len(translated_text)} chars")
+                else:
+                    print(f"[SEND_MESSAGE_AJAX] Translation skipped: {msg}")
+            else:
+                print(f"[SEND_MESSAGE_AJAX] No translation needed (user language: {user_language})")
+        except Exception as e:
+            # Important: Don't fail the message save if translation fails
+            print(f"[SEND_MESSAGE_AJAX] Translation error (non-blocking): {type(e).__name__}: {str(e)}")
+            # Message is already saved, so we can continue
+        
+        print(f"[SEND_MESSAGE_AJAX] ✓ SUCCESS - Message sent")
+        print(f"[SEND_MESSAGE_AJAX] ===== REQUEST END =====\n")
         
         return JsonResponse({
             'success': True,
@@ -534,16 +643,19 @@ def send_message_ajax(request, code):
                 'id': message.id,
                 'user_name': message.user_name,
                 'content': message.content,
+                'translated_content': message.translated_content,
                 'timestamp': message.timestamp.isoformat(),
                 'is_sender': True,
                 'is_deleted': message.is_deleted
             }
         })
     except Group.DoesNotExist:
-        print(f"[SEND_MESSAGE] Group {code} not found")
+        print(f"[SEND_MESSAGE_AJAX] ERROR: Group {code} not found")
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
-        print(f"[ERROR] send_message_ajax: {str(e)}")
+        print(f"[SEND_MESSAGE_AJAX] ERROR: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return JsonResponse({'error': str(e)}, status=400)
 
 
@@ -613,3 +725,82 @@ def get_all_groups_status(request):
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
+
+
+# ============================================================================
+# TRANSLATION ENDPOINT
+# ============================================================================
+
+@require_http_methods(["POST"])
+def translate_message(request, code):
+    """Translate a message to user's selected language using Gemini API"""
+    print(f"\n[TRANSLATE_ENDPOINT] === TRANSLATION REQUEST STARTED ===")
+    print(f"[TRANSLATE_ENDPOINT] Group code: {code}")
+    print(f"[TRANSLATE_ENDPOINT] Method: {request.method}")
+    print(f"[TRANSLATE_ENDPOINT] POST data: {request.POST}")
+    
+    try:
+        # Get group
+        print(f"[TRANSLATE_ENDPOINT] Looking up group...")
+        group = Group.objects.get(code=code)
+        print(f"[TRANSLATE_ENDPOINT] ✓ Group found: {group.name}")
+        
+        # AUTO-DELETE CHECK
+        should_delete, delete_reason = check_and_cleanup_group(group)
+        if should_delete:
+            print(f"[TRANSLATE_ENDPOINT] ✗ Group {code} deleted - returning 410 Gone")
+            return JsonResponse({
+                'error': 'Group deleted',
+                'status': 'group_deleted',
+                'reason': delete_reason
+            }, status=410)
+        
+        # Get translation parameters
+        text = request.POST.get('text', '').strip()
+        target_language = request.POST.get('language', 'English').strip()
+        
+        print(f"[TRANSLATE_ENDPOINT] Text to translate: '{text[:50] if text else 'EMPTY'}'")
+        print(f"[TRANSLATE_ENDPOINT] Target language: {target_language}")
+        
+        if not text:
+            print(f"[TRANSLATE_ENDPOINT] ✗ No text provided")
+            return JsonResponse({'error': 'No text provided'}, status=400)
+        
+        if not target_language:
+            print(f"[TRANSLATE_ENDPOINT] ✗ No target language specified")
+            return JsonResponse({'error': 'No target language specified'}, status=400)
+        
+        # Perform translation using Gemini API
+        print(f"[TRANSLATE_ENDPOINT] Calling translate_text() function...")
+        success, translated_text, message = translate_text(text, target_language)
+        print(f"[TRANSLATE_ENDPOINT] translate_text() returned: success={success}, message='{message}'")
+        
+        if not success:
+            print(f"[TRANSLATE_ENDPOINT] ✗ Translation failed: {message}")
+            return JsonResponse({
+                'success': False,
+                'error': message,
+                'translated': text  # Return original if translation fails
+            }, status=400)
+        
+        print(f"[TRANSLATE_ENDPOINT] ✓ Translated to {target_language}")
+        print(f"[TRANSLATE_ENDPOINT] Original: '{text[:50] if text else ''}'")
+        print(f"[TRANSLATE_ENDPOINT] Translated: '{translated_text[:50] if translated_text else ''}'")
+        
+        return JsonResponse({
+            'success': True,
+            'translated': translated_text,
+            'target_language': target_language,
+            'message': message
+        })
+        
+    except Group.DoesNotExist:
+        print(f"[TRANSLATE_ENDPOINT] ✗ Group {code} not found (DoesNotExist)")
+        return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
+    except Exception as e:
+        print(f"[TRANSLATE_ENDPOINT] ✗ EXCEPTION OCCURRED")
+        print(f"[TRANSLATE_ENDPOINT] Exception type: {type(e).__name__}")
+        print(f"[TRANSLATE_ENDPOINT] Exception message: {str(e)}")
+        import traceback
+        print(f"[TRANSLATE_ENDPOINT] Traceback:\n{traceback.format_exc()}")
+        return JsonResponse({'error': f'Translation error: {str(e)}'}, status=400)

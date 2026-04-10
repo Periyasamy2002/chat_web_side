@@ -20,6 +20,7 @@
             opacity: 0;
             transform: translateY(30px);
         }
+
         to {
             opacity: 1;
             transform: translateY(0);
@@ -37,6 +38,7 @@
             opacity: 0;
             transform: translateY(-20px);
         }
+
         to {
             opacity: 1;
             transform: translateY(0);
@@ -66,6 +68,7 @@
         from {
             opacity: 0;
         }
+
         to {
             opacity: 1;
         }
@@ -107,6 +110,37 @@
         background: rgba(255, 255, 255, 0.12);
     }
 
+    .form-group select {
+        width: 100%;
+        padding: 1rem;
+        border: 2px solid rgba(102, 126, 234, 0.3);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        box-sizing: border-box;
+        cursor: pointer;
+    }
+
+    .form-group select option {
+        background: #2a2a3e;
+        color: white;
+    }
+
+    .form-group select:focus {
+        outline: none;
+        border-color: #667eea;
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 0 15px rgba(102, 126, 234, 0.3);
+        transform: scale(1.02);
+    }
+
+    .form-group select:hover {
+        border-color: #764ba2;
+        background: rgba(255, 255, 255, 0.12);
+    }
+
     .button-group {
         display: flex;
         gap: 0.75rem;
@@ -141,6 +175,7 @@
             opacity: 0;
             transform: translateX(-30px);
         }
+
         to {
             opacity: 1;
             transform: translateX(0);
@@ -185,6 +220,7 @@
             opacity: 0;
             transform: translateX(30px);
         }
+
         to {
             opacity: 1;
             transform: translateX(0);
@@ -218,6 +254,7 @@
             opacity: 0;
             transform: translateY(20px);
         }
+
         to {
             opacity: 1;
             transform: translateY(0);
@@ -378,6 +415,7 @@
 
     /* ========== TOUCH-FRIENDLY INTERACTIONS ========== */
     @media (hover: none) and (pointer: coarse) {
+
         .form-group input,
         .submit-btn,
         .back-btn {
@@ -429,14 +467,15 @@
     </div>
 
     {% if error %}
-        <div style="background: rgba(244, 67, 54, 0.2); border-left: 4px solid #f44336; padding: 1rem; border-radius: 8px; color: #ffcdd2; margin-bottom: 1.5rem;">
-            {{ error }}
-        </div>
+    <div
+        style="background: rgba(244, 67, 54, 0.2); border-left: 4px solid #f44336; padding: 1rem; border-radius: 8px; color: #ffcdd2; margin-bottom: 1.5rem;">
+        {{ error }}
+    </div>
     {% endif %}
 
     <form method="POST">
         {% csrf_token %}
-        
+
         <div class="form-group">
             <label for="user_name">Your Name</label>
             <input type="text" id="user_name" name="user_name" placeholder="e.g., John, Alice" required>
@@ -447,6 +486,16 @@
             <input type="text" id="code" name="code" placeholder="e.g., 123 (or create a new one)" required>
         </div>
 
+        <div class="form-group">
+            <label for="language">Language</label>
+            <select name="language" required>
+                <option value="">Select Language</option>
+                <option value="English">🌐 English</option>
+                <option value="Tamil">🇮🇳 Tamil</option>
+            </select>
+        </div>
+
+
         <div class="button-group">
             <button type="submit" class="submit-btn">Enter Group 🚀</button>
             <a href="/" class="back-btn">Back Home</a>
@@ -454,7 +503,8 @@
     </form>
 
     <div class="info-box">
-        <strong>💡 Tip:</strong> Share the same group code with friends to join the same chat room! Your name will be used as your display name in the chat.
+        <strong>💡 Tip:</strong> Share the same group code with friends to join the same chat room! Your name will be
+        used as your display name in the chat.
     </div>
 </div>
 

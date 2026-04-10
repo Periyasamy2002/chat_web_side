@@ -339,6 +339,48 @@
         color: #999;
     }
 
+    /* TRANSLATION STYLES */
+    .message-translate-btn-container {
+        margin-top: 0.5rem;
+    }
+
+    .translate-btn {
+        background: rgba(102, 126, 234, 0.3);
+        border: 1px solid rgba(102, 126, 234, 0.6);
+        color: rgba(102, 126, 234, 0.9);
+        padding: 0.4rem 0.8rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-block;
+    }
+
+    .translate-btn:hover {
+        background: rgba(102, 126, 234, 0.5);
+        border-color: rgba(102, 126, 234, 0.8);
+        color: #667eea;
+        transform: scale(1.05);
+    }
+
+    .translate-btn.loading {
+        opacity: 0.6;
+        cursor: not-allowed;
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 0.9; }
+    }
+
+    .message-translated {
+        border-left: 3px solid rgba(102, 126, 234, 0.5);
+        padding-left: 0.5rem;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
+
     /* VOICE MESSAGE STYLES */
     .voice-message {
         display: flex;
@@ -1105,6 +1147,9 @@
         <div class="header-info">
             <span>Your Name: <strong>{{ user_name }}</strong></span>
             <span style="margin-left: 1rem;"><span class="online-indicator"></span> {{ online_count }} Online</span>
+            {% if language_name and language_name != 'English' %}
+                <span style="margin-left: 1rem; color: #667eea; font-weight: 600;">🌐 Messages: {{ language_name }}</span>
+            {% endif %}
         </div>
     </div>
 
@@ -1125,13 +1170,19 @@
 
                             <!-- TEXT MESSAGE -->
                             {% if msg.message_type == 'text' %}
-                                <div class="message-content">
+                                <div class="message-content" data-original="{{ msg.content|escape }}">
                                     {% if msg.is_deleted == 'deleted_for_all' %}
                                         <em>This message was deleted</em>
                                     {% else %}
                                         {{ msg.content }}
                                     {% endif %}
                                 </div>
+                                {% if msg.is_deleted != 'deleted_for_all' %}
+                                <div class="message-translate-btn-container">
+                                    <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.content|escapejs }}', this)" title="Translate this message">🌐 Translate</button>
+                                </div>
+                                <div class="message-translated" id="translated-{{ msg.id }}" style="display: none; margin-top: 8px; font-style: italic; color: rgba(255,255,255,0.7); padding: 8px 0;"></div>
+                                {% endif %}
                             
                             <!-- VOICE MESSAGE -->
                             {% elif msg.message_type == 'voice' %}
@@ -1178,7 +1229,7 @@
 
     <!-- INPUT AREA -->
     <div class="input-area">
-        <form class="input-form" id="messageForm">
+        <form class="input-form" id="messageForm" action="javascript:void(0);" onsubmit="return false;" method="POST">
             {% csrf_token %}
             <div class="input-wrapper">
                 <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
@@ -1264,6 +1315,19 @@
     });
 
     const groupCode = '{{ group.code }}';
+    const userLanguageName = '{{ language_name }}'; // Set from Django session
+    const userLanguageCode = '{{ language }}'; // en, ta, hi
+    
+    // Set data attributes on body for JavaScript access
+    document.body.dataset.groupCode = groupCode;
+    document.body.dataset.userLanguage = userLanguageName;
+    document.body.dataset.userLanguageCode = userLanguageCode;
+    
+    // Log current translation settings
+    if (userLanguageName && userLanguageName !== 'English') {
+        console.log(`[TRANSLATION] Chat language set to: ${userLanguageName}`);
+    }
+    
     let selectedMessage = null;
     let longPressTimer = null;
 
@@ -1958,7 +2022,16 @@
             if (msg.is_deleted === 'deleted_for_all') {
                 messageHTML += `<div class="message-content"><em>This message was deleted</em></div>`;
             } else {
-                messageHTML += `<div class="message-content">${escapeHtml(msg.content)}</div>`;
+                messageHTML += `
+                <div class="message-content" data-original="${escapeHtml(msg.content)}">
+                    ${escapeHtml(msg.content)}
+                </div>
+                <div class="message-translate-btn-container">
+                    <button class="translate-btn" onclick="translateMessage(event, ${msg.id}, '${msg.content.replace(/'/g, "\\'")}', this)" 
+                            title="Translate this message">🌐 Translate</button>
+                </div>
+                <div class="message-translated" id="translated-${msg.id}" style="display: none; margin-top: 8px; font-style: italic; color: rgba(255,255,255,0.7); padding: 8px 0;"></div>
+                `;
             }
         } else if (msg.message_type === 'voice') {
             const mimeType = msg.audio_mime_type || 'audio/webm';
@@ -2016,6 +2089,67 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Get user's selected language from session
+    function getUserLanguage() {
+        // This will be set from Django session on page load
+        return document.body.dataset.userLanguage || 'English';
+    }
+
+    async function translateMessage(event, messageId, originalText, buttonElement) {
+      
+        try {
+            event.preventDefault();
+            
+            const targetLanguage = getUserLanguage();
+            const groupCode = document.body.dataset.groupCode;
+            const translatedDiv = document.getElementById(`translated-${messageId}`);
+            
+            // Show loading state
+            buttonElement.classList.add('loading');
+            buttonElement.disabled = true;
+            buttonElement.textContent = '⏳ Translating...';
+            
+            const formData = new FormData();
+            formData.append('text', originalText);
+            formData.append('language', targetLanguage);
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+            
+            const response = await fetch(`/group/${groupCode}/translate/`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.translated && data.translated !== originalText) {
+                translatedDiv.textContent = `🌐 ${targetLanguage}: ${data.translated}`;
+                translatedDiv.style.display = 'block';
+                buttonElement.textContent = '✓ Translated';
+                buttonElement.style.background = 'rgba(76, 175, 80, 0.3)';
+                buttonElement.style.borderColor = 'rgba(76, 175, 80, 0.6)';
+                buttonElement.style.color = 'rgba(76, 175, 80, 0.9)';
+            } else {
+                translatedDiv.textContent = `Translation returned same text (already in ${targetLanguage}?)`;
+                translatedDiv.style.display = 'block';
+                buttonElement.textContent = '🌐 Translate';
+                buttonElement.style.background = '';
+                buttonElement.style.borderColor = '';
+                buttonElement.style.color = '';
+            }
+            
+            console.log(`[TRANSLATE] Message ${messageId} translated successfully`);
+        } catch (error) {
+            console.error(`[TRANSLATE ERROR] Failed to translate message ${messageId}:`, error);
+            const translatedDiv = document.getElementById(`translated-${messageId}`);
+            translatedDiv.textContent = `⚠️ Translation failed: ${error.message}. Showing original text.`;
+            translatedDiv.style.display = 'block';
+            buttonElement.textContent = '❌ Translation failed';
+        } finally {
+            buttonElement.classList.remove('loading');
+            buttonElement.disabled = false;
+        }
     }
 
     async function fetchNewMessages() {
@@ -2245,57 +2379,83 @@
     let listenersInitialized = false; // Guard flag to prevent duplicate listeners
     
     function sendMessage() {
+        console.log('[SEND_MESSAGE] ===== FUNCTION START =====');
+        
         // Prevent double submission
         if (isSubmittingMessage) {
-            console.warn('Message submission already in progress');
+            console.warn('[SEND_MESSAGE] Submission already in progress');
             return false;
         }
 
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
+        const messageForm = document.getElementById('messageForm');
         
         if (!messageInput) {
-            console.error('Message input not found');
+            console.error('[SEND_MESSAGE] Message input not found');
             return false;
         }
+        console.log('[SEND_MESSAGE] Message input found');
         
         if (!sendBtn) {
-            console.error('Send button not found');
+            console.error('[SEND_MESSAGE] Send button not found');
             return false;
         }
+        console.log('[SEND_MESSAGE] Send button found');
         
         const message = messageInput.value.trim();
+        console.log('[SEND_MESSAGE] Raw input value:', messageInput.value);
+        console.log('[SEND_MESSAGE] After trim:', message);
+        console.log('[SEND_MESSAGE] Message length:', message.length);
+        console.log('[SEND_MESSAGE] Character codes:', [...message].map(c => c.charCodeAt(0)));
 
         if (!message) {
-            console.debug('Empty message, not sending');
+            console.debug('[SEND_MESSAGE] Message is empty, not sending');
+            console.log('[SEND_MESSAGE] Raw value length:', messageInput.value.length);
+            console.log('[SEND_MESSAGE] Raw value codes:', [...messageInput.value].map(c => c.charCodeAt(0)));
             return false;
         }
 
         // Validate message length (max 5000 characters)
         if (message.length > 5000) {
+            console.error('[SEND_MESSAGE] Message too long');
             alert('Message is too long. Maximum 5000 characters allowed.');
             return false;
         }
 
-        console.log('Sending message:', message);
+        console.log('[SEND_MESSAGE] ✓ Message validation passed');
+        console.log('[SEND_MESSAGE] SENDING MESSAGE...');
 
         // Disable submit button during submission
         isSubmittingMessage = true;
         sendBtn.disabled = true;
         sendBtn.style.opacity = '0.6';
 
+        // Ensure form cannot be submitted during AJAX call
+        if (messageForm) {
+            messageForm.onsubmit = function(e) {
+                console.log('[SEND_MESSAGE] Form submission blocked during AJAX call');
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            };
+        }
+
         const formData = new FormData();
         formData.append('message', message);
+        console.log('[SEND_MESSAGE] FormData created with message');
         
         const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
         if (!csrfToken) {
-            console.error('CSRF token not found');
+            console.error('[SEND_MESSAGE] CSRF token not found');
             alert('Error: CSRF token missing');
             isSubmittingMessage = false;
             sendBtn.disabled = false;
             sendBtn.style.opacity = '1';
             return false;
         }
+        console.log('[SEND_MESSAGE] CSRF token found: ' + (csrfToken.value ? 'YES' : 'NO'));
+        console.log('[SEND_MESSAGE] Fetching to:', `/group/${groupCode}/send-message/`);
 
         fetch(`/group/${groupCode}/send-message/`, {
             method: 'POST',
@@ -2305,10 +2465,12 @@
             }
         })
         .then(response => {
+            console.log('[SEND_MESSAGE] Response status:', response.status);
+            
             // CHECK: Group Deleted (410 Gone)
             if (response.status === 410) {
                 return response.json().then(data => {
-                    console.warn('⚠️ Group deleted:', data.reason);
+                    console.warn('[SEND_MESSAGE] ⚠️ Group deleted:', data.reason);
                     alert('Group was deleted due to inactivity. Redirecting...');
                     setTimeout(() => { window.location.href = '/chat/'; }, 1000);
                     throw new Error('GroupDeleted');
@@ -2316,13 +2478,24 @@
             }
             
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                console.error('[SEND_MESSAGE] Response not OK:', response.statusText);
+                console.error('[SEND_MESSAGE] Status code:', response.status);
+                return response.text().then(text => {
+                    console.error('[SEND_MESSAGE] Response body:', text);
+                    throw new Error(`HTTP error! status: ${response.status}, body: ${text}`);
+                });
             }
-            return response.json();
+            return response.json().catch(err => {
+                console.error('[SEND_MESSAGE] Failed to parse JSON response');
+                console.error('[SEND_MESSAGE] Error:', err);
+                throw err;
+            });
         })
         .then(data => {
-            console.log('Send response:', data);
+            console.log('[SEND_MESSAGE] Response data:', data);
             if (data.success) {
+                console.log('[SEND_MESSAGE] ✓ Message sent successfully');
+                console.log('[SEND_MESSAGE] Message ID:', data.message?.id);
                 messageInput.value = '';
                 messageInput.focus();
                 // Fetch new messages immediately
@@ -2331,20 +2504,27 @@
                 setTimeout(scrollToBottom, 100);
             } else {
                 const errorMsg = data.error || 'Unknown error';
-                console.error('Send error:', errorMsg);
+                console.error('[SEND_MESSAGE] Server error:', errorMsg);
                 alert('Error sending message: ' + errorMsg);
             }
         })
         .catch(error => {
-            if (error.message === 'GroupDeleted') return;  // Already handled
-            console.error('Fetch error:', error);
+            if (error.message === 'GroupDeleted') {
+                console.log('[SEND_MESSAGE] Group deleted, handled');
+                return;  // Already handled
+            }
+            console.error('[SEND_MESSAGE] Fetch error:', error);
             alert('Error sending message: ' + error.message);
         })
         .finally(() => {
             // Re-enable submit button
+            console.log('[SEND_MESSAGE] FINALLY: Resetting isSubmittingMessage flag');
             isSubmittingMessage = false;
-            sendBtn.disabled = false;
-            sendBtn.style.opacity = '1';
+            if (sendBtn) {
+                sendBtn.disabled = false;
+                sendBtn.style.opacity = '1';
+            }
+            console.log('[SEND_MESSAGE] ===== FUNCTION END =====\n');
         });
         
         return false;
@@ -2354,72 +2534,86 @@
     function initializeEventListeners() {
         // Guard flag to prevent duplicate listener attachment
         if (listenersInitialized) {
-            console.log('Event listeners already initialized, skipping');
+            console.log('[INIT_LISTENERS] Event listeners already initialized, skipping');
             return;
         }
         
-        console.log('Initializing event listeners...');
+        console.log('[INIT_LISTENERS] ===== STARTING INITIALIZATION =====');
         
         const messageForm = document.getElementById('messageForm');
         const sendBtn = document.getElementById('sendBtn');
         const messageInput = document.getElementById('messageInput');
         
         if (!sendBtn) {
-            console.error('❌ Send button not found');
+            console.error('[INIT_LISTENERS] ❌ Send button not found');
             return;
         } else {
-            console.log('✓ Send button found');
+            console.log('[INIT_LISTENERS] ✓ Send button found');
         }
         
         if (!messageInput) {
-            console.error('❌ Message input not found');
+            console.error('[INIT_LISTENERS] ❌ Message input not found');
             return;
         } else {
-            console.log('✓ Message input found');
+            console.log('[INIT_LISTENERS] ✓ Message input found');
         }
         
         if (!messageForm) {
-            console.error('❌ Message form not found');
+            console.error('[INIT_LISTENERS] ❌ Message form not found');
             return;
         } else {
-            console.log('✓ Message form found');
+            console.log('[INIT_LISTENERS] ✓ Message form found');
         }
         
-        // Prevent form submission
+        // LAYER 1: Prevent form submission completely
         messageForm.addEventListener('submit', function(e) {
-            console.log('Form submit event intercepted');
+            console.log('[INIT_LISTENERS] LAYER-1: Form submit event intercepted');
             e.preventDefault();
             e.stopPropagation();
+            e.stopImmediatePropagation();
             return false;
         }, true); // Use capture phase to catch early
         
-        // Send message on button click
+        // LAYER 2: Inline onsubmit handler as backup
+        messageForm.onsubmit = function(e) {
+            console.log('[INIT_LISTENERS] LAYER-2: Inline form onsubmit handler triggered');
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            return false;
+        };
+        
+        // LAYER 3: Send message on button click
         sendBtn.addEventListener('click', function(e) {
-            console.log('Send button clicked');
+            console.log('[INIT_LISTENERS] LAYER-3: Send button clicked - calling sendMessage()');
             e.preventDefault();
             e.stopPropagation();
+            e.stopImmediatePropagation();
             sendMessage();
             return false;
         }, false);
 
-        // Send message on Enter key press in input
+        // LAYER 4: Send message on Enter key press in input
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
-                console.log('Enter key pressed in message input');
+                console.log('[INIT_LISTENERS] LAYER-4: Enter key pressed - calling sendMessage()');
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation();
                 sendMessage();
                 return false;
             }
         }, false);
         
-        // Mobile touch support for button
+        // LAYER 5: Mobile touch support for button
         if ('ontouchstart' in window) {
-            console.log('Touch support detected, adding touchend listener');
+            console.log('[INIT_LISTENERS] LAYER-5: Touch support detected, adding touchend listener');
             sendBtn.addEventListener('touchend', function(e) {
-                console.log('Send button touched');
+                console.log('[INIT_LISTENERS] LAYER-5: Send button touched - calling sendMessage()');
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation();
                 sendMessage();
                 return false;
             }, false);
@@ -2427,19 +2621,20 @@
         
         // Mark as initialized to prevent re-attachment
         listenersInitialized = true;
-        console.log('✓ Event listeners initialized successfully');
+        console.log('[INIT_LISTENERS] ✓ Event listeners initialized successfully (5 layers)');
+        console.log('[INIT_LISTENERS] ===== INITIALIZATION COMPLETE =====\n');
     }
 
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
-        console.log('DOM still loading, waiting for DOMContentLoaded event');
+        console.log('[DOM_READY] DOM still loading, waiting for DOMContentLoaded event');
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOMContentLoaded event fired');
+            console.log('[DOM_READY] ✓ DOMContentLoaded event fired');
             initializeEventListeners();
         });
     } else {
         // DOM is already loaded
-        console.log('DOM already loaded, initializing immediately');
+        console.log('[DOM_READY] DOM already loaded, initializing immediately');
         initializeEventListeners();
     }
 
@@ -2462,11 +2657,10 @@
     window.addEventListener('beforeunload', function() {
         stopPolling();
         // Update user status to offline
+        const formData = new FormData();
         fetch(`/group/${groupCode}/update-status/`, {
             method: 'POST',
-            body: new FormData(new (function() {
-                this.append = function() {};
-            })()),
+            body: formData,
             headers: {
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             },

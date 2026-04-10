@@ -140,6 +140,10 @@ class Message(models.Model):
     # Deletion tracking
     is_deleted = models.CharField(max_length=20, choices=DELETE_STATUS_CHOICES, default='not_deleted')
     
+    # Translation support
+    translated_content = models.TextField(blank=True, null=True, help_text='Cached translation of original content')
+    translated_language = models.CharField(max_length=50, blank=True, default='', help_text='Language that translated_content is in')
+    
     timestamp = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
 
