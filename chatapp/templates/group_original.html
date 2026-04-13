@@ -1,0 +1,3098 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh; /* Use dynamic viewport height for mobile */
+        overflow: hidden;
+    }
+
+    .chat-page {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        overflow: hidden;
+        height: 100dvh; /* Use dynamic viewport height - respects keyboard on mobile */
+        width: 100%;
+    }
+
+    .chat-header {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(240, 147, 251, 0.4));
+        padding: 0.75rem 1rem;
+        border-bottom: 2px solid rgba(102, 126, 234, 0.3);
+        backdrop-filter: blur(10px);
+        animation: slideInDown 0.6s ease-out;
+        flex-shrink: 0;
+        min-height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    @keyframes slideInDown {
+        from {
+            opacity: 0;
+            transform: translateY(-30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .header-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0;
+        flex: 1;
+        gap: 0.5rem;
+    }
+
+    .chat-header h2 {
+        color: white;
+        margin: 0;
+        font-size: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .online-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        background: #4CAF50;
+        border-radius: 50%;
+        border: 2px solid white;
+    }
+
+    .online-count {
+        display: inline-block;
+        background: rgba(240, 147, 251, 0.3);
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .header-info {
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.8);
+        display: flex;
+        gap: 1rem;
+    }
+
+    /* PARTICIPANT LIST DROPDOWN */
+    .participants-dropdown {
+        position: relative;
+    }
+
+    .participants-btn {
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.3s ease;
+    }
+
+    .participants-btn:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    .participants-list {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        min-width: 250px;
+        max-height: 400px;
+        overflow-y: auto;
+        margin-top: 0.5rem;
+        z-index: 1000;
+        display: none;
+    }
+
+    .participants-list.active {
+        display: block;
+        animation: slideInDown 0.3s ease-out;
+    }
+
+    .participant-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #eee;
+        transition: background-color 0.2s ease;
+    }
+
+    .participant-item:last-child {
+        border-bottom: none;
+    }
+
+    .participant-item:hover {
+        background: #f5f5f5;
+    }
+
+    .participant-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 1rem;
+        position: relative;
+    }
+
+    .participant-status {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 12px;
+        height: 12px;
+        background: #4CAF50;
+        border-radius: 50%;
+        border: 2px solid white;
+    }
+
+    .participant-status.offline {
+        background: #999;
+    }
+
+    .participant-info {
+        flex: 1;
+    }
+
+    .participant-name {
+        font-weight: 600;
+        color: #333;
+        font-size: 0.95rem;
+    }
+
+    .participant-status-text {
+        font-size: 0.8rem;
+        color: #999;
+    }
+
+    .you-badge {
+        background: #667eea;
+        color: white;
+        padding: 0.2rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+
+    .messages-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .messages-scroll::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .messages-scroll::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+    }
+
+    .messages-scroll::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+    }
+
+    .messages-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.5);
+    }
+
+    .message-group {
+        display: flex;
+        margin-bottom: 0.5rem;
+        animation: messageSlideIn 0.3s ease-out;
+        position: relative;
+    }
+
+    @keyframes messageSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .message-group.sender {
+        justify-content: flex-end;
+    }
+
+    .message-group.receiver {
+        justify-content: flex-start;
+    }
+
+    .message-bubble {
+        max-width: 85%;
+        padding: 0.6rem 0.8rem;
+        border-radius: 18px;
+        word-wrap: break-word;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        transition: all 0.2s ease;
+        position: relative;
+        cursor: context-menu;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
+
+    .message-bubble:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    .message-bubble.sender {
+        background: linear-gradient(135deg, #4CAF50, #45a049);
+        color: white;
+        border-bottom-right-radius: 4px;
+    }
+
+    .message-bubble.receiver {
+        background: white;
+        color: #333;
+        border-bottom-left-radius: 4px;
+    }
+
+    .message-bubble.deleted {
+        opacity: 0.5;
+        font-style: italic;
+    }
+
+    .message-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.3rem;
+        justify-content: space-between;
+    }
+
+    .message-bubble b {
+        font-size: 0.85rem;
+        opacity: 0.9;
+    }
+
+    .message-bubble.sender b {
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .message-bubble.receiver b {
+        color: #667eea;
+    }
+
+    .message-content {
+        margin: 0.3rem 0;
+    }
+
+    .message-time {
+        font-size: 0.75rem;
+        opacity: 0.8;
+        margin-top: 0.3rem;
+        display: block;
+    }
+
+    .message-bubble.sender .message-time {
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .message-bubble.receiver .message-time {
+        color: #999;
+    }
+
+    /* TRANSLATION STYLES */
+    .message-translate-btn-container {
+        margin-top: 0.5rem;
+    }
+
+    .translate-btn {
+        background: rgba(102, 126, 234, 0.3);
+        border: 1px solid rgba(102, 126, 234, 0.6);
+        color: rgba(102, 126, 234, 0.9);
+        padding: 0.4rem 0.8rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-block;
+    }
+
+    .translate-btn:hover {
+        background: rgba(102, 126, 234, 0.5);
+        border-color: rgba(102, 126, 234, 0.8);
+        color: #667eea;
+        transform: scale(1.05);
+    }
+
+    .translate-btn.loading {
+        opacity: 0.6;
+        cursor: not-allowed;
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 0.9; }
+    }
+
+    .message-translated {
+        border-left: 3px solid rgba(102, 126, 234, 0.5);
+        padding-left: 0.5rem;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
+
+    /* VOICE MESSAGE STYLES */
+    .voice-message {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0;
+    }
+
+    .voice-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .play-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255, 255, 255, 0.3);
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.2s ease;
+    }
+
+    .message-bubble.sender .play-btn {
+        background: rgba(255, 255, 255, 0.3);
+        color: white;
+    }
+
+    .message-bubble.receiver .play-btn {
+        background: rgba(102, 126, 234, 0.2);
+        color: #667eea;
+    }
+
+    .play-btn:hover {
+        background: rgba(255, 255, 255, 0.5);
+        transform: scale(1.1);
+    }
+
+    .play-btn:active {
+        transform: scale(0.95);
+    }
+
+    .voice-progress {
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .message-bubble.receiver .progress-bar {
+        background: rgba(102, 126, 234, 0.1);
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        border-radius: 2px;
+        width: 0%;
+        transition: width 0.1s linear;
+    }
+
+    .message-bubble.receiver .progress-fill {
+        background: #667eea;
+    }
+
+    .voice-duration {
+        font-size: 0.75rem;
+        min-width: 35px;
+        text-align: right;
+    }
+
+    .message-bubble.sender .voice-duration {
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .message-bubble.receiver .voice-duration {
+        color: #999;
+    }
+
+    /* CONTEXT MENU */
+    .context-menu {
+        position: fixed;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        z-index: 10000;
+        display: none;
+        min-width: 180px;
+        overflow: hidden;
+    }
+
+    .context-menu.active {
+        display: block;
+        animation: slideInUp 0.2s ease-out;
+    }
+
+    .context-menu-item {
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+        color: #333;
+        font-size: 0.95rem;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .context-menu-item:last-child {
+        border-bottom: none;
+    }
+
+    .context-menu-item:hover {
+        background: #f5f5f5;
+    }
+
+    .context-menu-item.delete {
+        color: #F44336;
+    }
+
+    .context-menu-item.delete:hover {
+        background: #ffebee;
+    }
+
+    .empty-state {
+        text-align: center;
+        color: white;
+        padding: 2rem;
+    }
+
+    .empty-state p {
+        font-size: 1.2rem;
+        opacity: 0.8;
+    }
+
+    /* INPUT AREA STYLES */
+    .input-area {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 0.6rem 0.75rem;
+        border-top: 2px solid rgba(102, 126, 234, 0.3);
+        backdrop-filter: blur(10px);
+        animation: slideInUp 0.6s ease-out;
+        flex-shrink: 0;
+        min-height: 55px;
+        display: flex;
+        align-items: flex-end;
+    }
+
+    @keyframes slideInUp {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .input-form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-end;
+        width: 100%;
+    }
+
+    .input-wrapper {
+        flex: 1;
+        position: relative;
+        min-width: 0;
+    }
+
+    .input-form input {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.15);
+        color: white;
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
+        min-height: 40px;
+    }
+
+    .input-form input::placeholder {
+        color: rgba(255, 255, 255, 0.6);
+    }
+
+    .input-form input:focus {
+        outline: none;
+        border-color: rgba(255, 255, 255, 0.6);
+        background: rgba(255, 255, 255, 0.25);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+    }
+
+    .send-btn, .mic-btn {
+        padding: 0.6rem 0.7rem;
+        background: linear-gradient(90deg, #4CAF50, #45a049);
+        color: white;
+        border: none;
+        border-radius: 20px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+        min-width: 45px;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+    }
+
+    .send-btn::before, .mic-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, #45a049, #3d8b40);
+        z-index: -1;
+        transition: left 0.3s ease;
+    }
+
+    .send-btn:hover::before, .mic-btn:hover::before {
+        left: 0;
+    }
+
+    .send-btn:hover, .mic-btn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+    }
+
+    .send-btn:active, .mic-btn:active {
+        transform: scale(0.98);
+    }
+
+    .mic-btn.recording {
+        background: linear-gradient(90deg, #F44336, #D32F2F);
+        animation: micPulse 1s ease-in-out infinite;
+    }
+
+    @keyframes micPulse {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7);
+        }
+        50% {
+            box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+        }
+    }
+
+    .recording-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: white;
+        font-size: 0.9rem;
+        margin-left: 1rem;
+    }
+
+    .recording-dot {
+        width: 8px;
+        height: 8px;
+        background: #F44336;
+        border-radius: 50%;
+        animation: blink 1s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.3;
+        }
+    }
+
+    /* CONFIRMATION DIALOG */
+    .confirmation-dialog {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 10001;
+    }
+
+    .confirmation-dialog.active {
+        display: flex;
+        animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    .confirmation-content {
+        background: white;
+        border-radius: 12px;
+        padding: 2rem;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        max-width: 400px;
+        text-align: center;
+    }
+
+    .confirmation-content h3 {
+        color: #333;
+        margin-bottom: 1rem;
+        font-size: 1.2rem;
+    }
+
+    .confirmation-content p {
+        color: #666;
+        margin-bottom: 1.5rem;
+        font-size: 0.95rem;
+    }
+
+    .confirmation-buttons {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+    }
+
+    .confirmation-buttons button {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.95rem;
+    }
+
+    .confirmation-buttons .btn-cancel {
+        background: #e0e0e0;
+        color: #333;
+    }
+
+    .confirmation-buttons .btn-cancel:hover {
+        background: #d0d0d0;
+    }
+
+    .confirmation-buttons .btn-confirm {
+        background: #F44336;
+        color: white;
+    }
+
+    .confirmation-buttons .btn-confirm:hover {
+        background: #D32F2F;
+    }
+
+    .delete-options {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+
+    .delete-option {
+        padding: 0.75rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.95rem;
+        color: #333;
+    }
+
+    .delete-option:hover {
+        border-color: #F44336;
+        background: #fff3e0;
+    }
+
+    .delete-option input[type="radio"] {
+        margin-right: 0.5rem;
+    }
+
+    @media (max-width: 768px) {
+        .message-bubble {
+            max-width: 88%;
+        }
+
+        .chat-header {
+            padding: 0.75rem 1rem;
+        }
+
+        .input-area {
+            padding: 0.6rem 0.75rem;
+        }
+
+        .messages-scroll {
+            padding: 0.75rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1rem;
+        }
+
+        .input-form {
+            gap: 0.5rem;
+        }
+
+        .send-btn, .mic-btn {
+            padding: 0.6rem 0.7rem;
+            min-width: 45px;
+            font-size: 1.1rem;
+        }
+
+        .context-menu {
+            min-width: 200px;
+        }
+
+        .confirmation-content {
+            margin: 0 1rem;
+            max-width: calc(100% - 2rem);
+        }
+    }
+
+    @media (max-width: 480px) {
+        .chat-page {
+            position: fixed;
+            height: 100dvh; /* Use dynamic viewport height - adjusts when keyboard appears */
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .chat-header {
+            padding: 0.6rem 0.8rem;
+            min-height: 55px;
+            flex-shrink: 0;
+        }
+
+        .header-top {
+            margin-bottom: 0;
+        }
+
+        .chat-header h2 {
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        .header-info {
+            font-size: 0.7rem;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+
+        .online-indicator {
+            width: 9px;
+            height: 9px;
+        }
+
+        .online-count {
+            padding: 0.15rem 0.4rem;
+            font-size: 0.7rem;
+        }
+
+        .messages-scroll {
+            flex: 1;
+            padding: 0.6rem 0.6rem;
+            gap: 0.5rem;
+            -webkit-overflow-scrolling: touch;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .message-bubble {
+            max-width: 90%;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        .message-header {
+            margin-bottom: 0.15rem;
+        }
+
+        .message-bubble b {
+            font-size: 0.75rem;
+        }
+
+        .message-time {
+            font-size: 0.65rem;
+            margin-top: 0.15rem;
+        }
+
+        .voice-message {
+            gap: 0.4rem;
+        }
+
+        .play-btn {
+            width: 30px;
+            height: 30px;
+            font-size: 0.95rem;
+            min-width: 30px;
+            min-height: 30px;
+        }
+
+        .voice-duration {
+            min-width: 28px;
+            font-size: 0.65rem;
+        }
+
+        .input-area {
+            padding: 0.5rem 0.6rem;
+            min-height: 48px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: flex-end;
+            gap: 0.4rem;
+        }
+
+        .input-form {
+            width: 100%;
+            display: flex;
+            gap: 0.35rem;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .input-form input {
+            width: 100%;
+            padding: 0.5rem 0.7rem;
+            font-size: 0.9rem;
+            border-radius: 18px;
+            min-height: 36px;
+            box-sizing: border-box;
+        }
+
+        .send-btn, .mic-btn {
+            padding: 0.5rem 0.6rem;
+            min-width: 44px;
+            min-height: 44px;
+            font-size: 1rem;
+            border-radius: 18px;
+            flex-shrink: 0;
+            cursor: pointer;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .recording-indicator {
+            font-size: 0.75rem;
+            margin-left: 0.4rem;
+        }
+
+        .recording-dot {
+            width: 6px;
+            height: 6px;
+        }
+
+        .context-menu {
+            min-width: 150px;
+            font-size: 0.85rem;
+        }
+
+        .context-menu-item {
+            padding: 0.5rem 0.7rem;
+            font-size: 0.85rem;
+        }
+
+        .participants-list {
+            min-width: 200px;
+            max-height: 300px;
+        }
+
+        .participant-avatar {
+            width: 35px;
+            height: 35px;
+            font-size: 0.85rem;
+        }
+
+        .confirmation-content {
+            padding: 1.2rem;
+            margin: 1rem;
+            max-width: calc(100% - 2rem);
+        }
+
+        .confirmation-content h3 {
+            font-size: 1rem;
+        }
+
+        .confirmation-content p {
+            font-size: 0.85rem;
+        }
+
+        .confirmation-buttons button {
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+        }
+    }
+
+    @media (max-width: 360px) {
+        .chat-header h2 {
+            font-size: 0.85rem;
+        }
+
+        .header-info {
+            font-size: 0.65rem;
+        }
+
+        .message-bubble {
+            max-width: 93%;
+            padding: 0.45rem 0.7rem;
+            font-size: 0.85rem;
+        }
+
+        .input-form input {
+            padding: 0.45rem 0.65rem;
+            font-size: 0.85rem;
+            min-height: 34px;
+        }
+
+        .send-btn, .mic-btn {
+            min-height: 34px;
+            min-width: 38px;
+            font-size: 0.95rem;
+        }
+
+        .participants-btn {
+            font-size: 0.8rem;
+            padding: 0.3rem 0.6rem;
+        }
+    }
+
+    /* ========== TABLET MEDIA QUERIES ========== */
+    @media (min-width: 769px) and (max-width: 1024px) {
+        .message-bubble {
+            max-width: 70%;
+        }
+
+        .chat-header {
+            padding: 1.2rem 1.8rem;
+        }
+
+        .messages-scroll {
+            padding: 1.2rem 1.8rem;
+        }
+
+        .input-area {
+            padding: 0.9rem 1.5rem;
+        }
+
+        .chat-header h2 {
+            font-size: 1.4rem;
+        }
+    }
+
+    /* ========== TOUCH-FRIENDLY INTERACTIONS ========== */
+    @media (hover: none) and (pointer: coarse) {
+        .send-btn, .mic-btn {
+            min-height: 48px;
+            min-width: 48px;
+            padding: 0.75rem 1rem;
+        }
+
+        .input-form input {
+            min-height: 48px;
+        }
+
+        .message-bubble {
+            cursor: pointer;
+        }
+
+        .context-menu-item {
+            padding: 0.9rem 1rem;
+            min-height: 44px;
+        }
+
+        .play-btn {
+            min-height: 44px;
+            min-width: 44px;
+        }
+
+        .message-bubble:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+    }
+
+    /* ========== ANIMATION PERFORMANCE ========== */
+    @media (prefers-reduced-motion: reduce) {
+        * {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    /* ========== SMOOTH SCROLLING ========== */
+    html {
+        scroll-behavior: smooth;
+    }
+
+    .messages-scroll {
+        scroll-behavior: smooth;
+    }
+
+    /* ========== ORIENTATION HANDLING ========== */
+    @media (orientation: landscape) and (max-height: 500px) {
+        .chat-page {
+            height: auto;
+            min-height: 100vh;
+        }
+
+        .chat-header {
+            padding: 0.5rem 1rem;
+        }
+
+        .messages-scroll {
+            max-height: 60vh;
+        }
+
+        .input-area {
+            padding: 0.5rem;
+        }
+    }
+</style>
+
+<div class="chat-page">
+    <!-- CHAT HEADER -->
+    <div class="chat-header">
+        <div class="header-top">
+            <div>
+                <h2>
+                    💬 {{ group.code }}
+                </h2>
+            </div>
+        </div>
+        <div class="header-info">
+            <span>Your Name: <strong>{{ user_name }}</strong></span>
+            <span style="margin-left: 1rem;"><span class="online-indicator"></span> {{ online_count }} Online</span>
+            {% if language_mode == 'tamil' %}
+                <span style="margin-left: 1rem; color: #ff9800; font-weight: 600;">🇹🇳 Tamil Mode - Display Only Tamil</span>
+            {% else %}
+                <span style="margin-left: 1rem; color: #667eea; font-weight: 600;">🔤 English Mode - Display Only English</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- MESSAGES AREA -->
+    <div class="messages-scroll" id="messagesScroll">
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="message-group {% if msg.session_id == request.session.session_key %}sender{% else %}receiver{% endif %}">
+                    <div class="message-bubble {% if msg.session_id == request.session.session_key %}sender{% else %}receiver{% endif %} {% if msg.is_deleted != 'not_deleted' %}deleted{% endif %}" 
+                         data-message-id="{{ msg.id }}" 
+                         data-is-sender="{% if msg.session_id == request.session.session_key %}true{% else %}false{% endif %}">
+                            
+                            {% if msg.session_id != request.session.session_key %}
+                                <div class="message-header">
+                                    <b>{{ msg.user_name }}</b>
+                                </div>
+                            {% endif %}
+
+                            <!-- TEXT MESSAGE -->
+                            {% if msg.message_type == 'text' %}
+                                <div class="message-content" data-original="{{ msg.content|escape }}">
+                                    {% if msg.is_deleted == 'deleted_for_all' %}
+                                        <em>This message was deleted</em>
+                                    {% else %}
+                                        {{ msg.content }}
+                                    {% endif %}
+                                </div>
+                                {% if msg.is_deleted != 'deleted_for_all' %}
+                                <div class="message-translate-btn-container">
+                                    <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.content|escapejs }}', this)" title="Translate this message">🌐 Translate</button>
+                                </div>
+                                <div class="message-translated" id="translated-{{ msg.id }}" style="display: none; margin-top: 8px; font-style: italic; color: rgba(255,255,255,0.7); padding: 8px 0;"></div>
+                                {% endif %}
+                            
+                            <!-- VOICE MESSAGE -->
+                            {% elif msg.message_type == 'voice' %}
+                                <div class="voice-message">
+                                    <div class="voice-controls">
+                                        <button class="play-btn" onclick="togglePlayPause(event, this)">▶️</button>
+                                    </div>
+                                    <div class="voice-progress">
+                                        <div class="progress-bar" onclick="seekAudio(event, this)">
+                                            <div class="progress-fill"></div>
+                                        </div>
+                                    </div>
+                                    <div class="voice-duration">
+                                        {% if msg.duration %}
+                                            <span class="duration-text">{{ msg.duration|floatformat:0 }}s</span>
+                                        {% else %}
+                                            <span class="duration-text">0s</span>
+                                        {% endif %}
+                                    </div>
+                                    <audio style="display: none;" data-duration="{{ msg.duration }}">
+                                        <source src="{{ msg.audio_file.url }}" type="{{ msg.audio_mime_type|default:'audio/webm' }}">
+                                        <!-- Fallback MIME types for browser compatibility -->
+                                        {% if msg.audio_mime_type and 'webm' in msg.audio_mime_type or 'opus' in msg.audio_mime_type %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/ogg;codecs=opus">
+                                        {% elif msg.audio_mime_type and 'mp4' in msg.audio_mime_type or 'aac' in msg.audio_mime_type %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/aac">
+                                        {% else %}
+                                            <source src="{{ msg.audio_file.url }}" type="audio/ogg">
+                                        {% endif %}
+                                    </audio>
+                                </div>
+                            {% endif %}
+
+                            <span class="message-time">{{ msg.timestamp|date:"H:i" }}</span>
+                        </div>
+                    </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <p>👋 Be the first to start the conversation!</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- INPUT AREA -->
+    <div class="input-area">
+        <form class="input-form" id="messageForm" action="javascript:void(0);" onsubmit="return false;" method="POST">
+            {% csrf_token %}
+            <div class="input-wrapper">
+                <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
+                <small id="inputError" style="color: #ffcdd2; display: none; margin-top: 0.3rem; font-size: 0.75rem;">
+                    <!-- Error messages will appear here -->
+                </small>
+            </div>
+            <button type="button" class="send-btn" id="sendBtn">✈️</button>
+            <button type="button" class="mic-btn" id="micBtn" title="Press and hold to record">🎤</button>
+        </form>
+        <div class="recording-indicator" id="recordingIndicator" style="display: none;">
+            <div class="recording-dot"></div>
+            <span>Recording...</span>
+        </div>
+    </div>
+</div>
+
+<!-- CONTEXT MENU -->
+<div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" onclick="copyMessage()" id="copyOption" style="display: none;">
+        📋 Copy
+    </div>
+    <div class="context-menu-item delete" onclick="showDeleteDialog()">
+        🗑️ Delete
+    </div>
+</div>
+
+<!-- DELETE CONFIRMATION DIALOG -->
+<div class="confirmation-dialog" id="deleteDialog">
+    <div class="confirmation-content">
+        <h3>Delete Message?</h3>
+        <div class="delete-options">
+            <label class="delete-option">
+                <input type="radio" name="delete-type" value="for_me" checked>
+                <span>Delete for me</span>
+            </label>
+            <label class="delete-option" id="deleteForAllOption" style="display: none;">
+                <input type="radio" name="delete-type" value="for_all">
+                <span>Delete for everyone</span>
+            </label>
+        </div>
+        <div class="confirmation-buttons" style="margin-top: 1.5rem;">
+            <button class="btn-cancel" onclick="hideDeleteDialog()">Cancel</button>
+            <button class="btn-confirm" onclick="confirmDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // === AUTO-SCROLL ===
+    function scrollToBottom() {
+        const messagesScroll = document.getElementById('messagesScroll');
+        if (messagesScroll) {
+            setTimeout(() => {
+                messagesScroll.scrollTop = messagesScroll.scrollHeight;
+            }, 0);
+        }
+    }
+
+    // === MOBILE VIEWPORT HANDLING ===
+    let isMobileViewport = window.innerWidth <= 480;
+    
+    function handleMobileViewport() {
+        isMobileViewport = window.innerWidth <= 480;
+        if (isMobileViewport) {
+            // Ensure messages scroll to bottom on mobile
+            scrollToBottom();
+        }
+    }
+
+    window.addEventListener('load', scrollToBottom);
+    window.addEventListener('resize', handleMobileViewport);
+    window.addEventListener('orientationchange', function() {
+        setTimeout(scrollToBottom, 100);
+    });
+    
+    // Focus input when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            // Delay focus to ensure DOM is fully ready on mobile
+            setTimeout(() => {
+                messageInput.focus();
+            }, 100);
+        }
+    });
+
+    const groupCode = '{{ group.code }}';
+    const userLanguageName = '{{ language_name }}'; // Set from Django session
+    const userLanguageCode = '{{ language }}'; // en, ta, hi
+    const userLanguageMode = '{{ language_mode }}' || 'english'; // 'english' or 'tamil'
+    
+    // Set data attributes on body for JavaScript access
+    document.body.dataset.groupCode = groupCode;
+    document.body.dataset.userLanguage = userLanguageName;
+    document.body.dataset.userLanguageCode = userLanguageCode;
+    document.body.dataset.languageMode = userLanguageMode;
+    
+    // Log current translation settings
+    console.log('[LANGUAGE MODE] Current mode:', userLanguageMode);
+    if (userLanguageName && userLanguageName !== 'English') {
+        console.log(`[TRANSLATION] Chat language set to: ${userLanguageName}`);
+    }
+
+    // ===== TAMIL SCRIPT DETECTION =====
+    function containsTamilScript(text) {
+        const TAMIL_START = 0x0B80;
+        const TAMIL_END = 0x0BFF;
+        
+        for (let char of text) {
+            const code = char.charCodeAt(0);
+            if (code >= TAMIL_START && code <= TAMIL_END) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function containsTanglish(text) {
+        const tamilPatterns = [
+            /\b(vanakkam|namaskara|namaskar|saalama|salama|kannamma|ambi|ammaa)\b/i,
+            /\b(sollra|sollre|sollren|sollran|pesi|pesanum)\b/i,
+            /\b(nee|naan|avan|ava|avanga|avangaluku|avan)\b/i,
+            /\b(thamizh|tamil|tamizhaga|tamizh)\b/i,
+        ];
+        
+        for (let pattern of tamilPatterns) {
+            if (pattern.test(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isValidEnglishOnly(text) {
+        // Check for Tamil script
+        if (containsTamilScript(text)) {
+            return { valid: false, error: '❌ Tamil characters not allowed in English Mode' };
+        }
+        
+        // Check for Tanglish
+        if (containsTanglish(text)) {
+            return { valid: false, error: '❌ Tanglish (Tamil in Roman letters) not allowed' };
+        }
+        
+        // Check for other non-ASCII characters
+        if (!/^[a-zA-Z0-9\s\-'.,!?;:()@&*\\/]+$/.test(text.trim())) {
+            return { valid: false, error: '❌ Only English letters and basic punctuation allowed' };
+        }
+        
+        return { valid: true, error: '' };
+    }
+
+    // ===== LANGUAGE MODE INPUT HANDLER =====
+    document.addEventListener('DOMContentLoaded', function() {
+        const messageInput = document.getElementById('messageInput');
+        const inputError = document.getElementById('inputError');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Set placeholder based on language mode
+        if (userLanguageMode === 'tamil') {
+            messageInput.placeholder = 'செய்தி எழுதவும்...'; // "Type a message..." in Tamil
+            console.log('[TAMIL MODE] Input initialized with Tamil placeholder');
+        } else {
+            messageInput.placeholder = 'Type a message...';
+            console.log('[ENGLISH MODE] Input initialized with English placeholder');
+        }
+
+        // ===== TAMIL MODE INPUT HANDLING =====
+        if (userLanguageMode === 'tamil') {
+            messageInput.addEventListener('input', async function(e) {
+                let inputValue = this.value;
+                console.log('[TAMIL] Raw input:', inputValue);
+
+                if (!inputValue.trim()) {
+                    inputError.style.display = 'none';
+                    return;
+                }
+
+                // Check if input contains English letters
+                const hasEnglish = /[a-zA-Z0-9]/.test(inputValue);
+                const hasTamil = containsTamilScript(inputValue);
+
+                if (hasEnglish && !hasTamil) {
+                    // Pure English input - translate to Tamil
+                    console.log('[TAMIL] English input detected, translating to Tamil...');
+                    try {
+                        const translated = await translateToTamil(inputValue);
+                        if (translated && translated !== inputValue) {
+                            this.value = translated;
+                            console.log('[TAMIL] Translated to Tamil:', translated);
+                            inputError.textContent = '✓ Converted to Tamil';
+                            inputError.style.color = '#4CAF50';
+                            inputError.style.display = 'block';
+                        }
+                    } catch (err) {
+                        console.warn('[TAMIL] Translation failed:', err);
+                        inputError.textContent = '⚠️ Translation in progress...';
+                        inputError.style.color = '#ff9800';
+                        inputError.style.display = 'block';
+                    }
+                } else if (hasTamil) {
+                    // Tamil script detected - keep as is
+                    inputError.style.display = 'none';
+                    console.log('[TAMIL] Tamil input detected and accepted');
+                } else if (hasEnglish && hasTamil) {
+                    // Mixed - show only Tamil part
+                    const tamilOnly = inputValue.replace(/[a-zA-Z0-9\s\-'.,!?;:()@&*\\/]+/g, '').trim();
+                    if (tamilOnly) {
+                        this.value = tamilOnly;
+                        console.log('[TAMIL] Mixed input, showing Tamil only:', tamilOnly);
+                    }
+                }
+            });
+
+            // Prevent English character entry directly
+            messageInput.addEventListener('keypress', function(e) {
+                const char = String.fromCharCode(e.which);
+                const currentValue = this.value + char;
+                
+                // Allow Tamil characters and backspace
+                if (!/^[a-zA-Z0-9]/.test(char) || containsTamilScript(currentValue)) {
+                    return true;
+                }
+                
+                // If it's English and we already have content, allow it temporarily (will be converted)
+                return true;
+            });
+        }
+        // ===== ENGLISH MODE INPUT HANDLING =====
+        else {
+            messageInput.addEventListener('input', function(e) {
+                const inputValue = this.value;
+                console.log('[ENGLISH] Raw input:', inputValue);
+
+                if (!inputValue.trim()) {
+                    inputError.style.display = 'none';
+                    return;
+                }
+
+                // Validate English mode
+                const validation = isValidEnglishOnly(inputValue);
+                if (!validation.valid) {
+                    inputError.textContent = validation.error;
+                    inputError.style.color = '#ffcdd2';
+                    inputError.style.display = 'block';
+                    
+                    // Remove invalid characters
+                    const cleanedValue = inputValue.replace(/[^\x00-\x7F]/g, '');
+                    this.value = cleanedValue;
+                    console.log('[ENGLISH] Invalid characters removed:', cleanedValue);
+                } else {
+                    inputError.style.display = 'none';
+                }
+            });
+
+            // Block Tamil characters from being typed in English mode
+            messageInput.addEventListener('keydown', function(e) {
+                // Allow control keys
+                if (e.ctrlKey || e.altKey || e.key.length > 1) {
+                    return true;
+                }
+
+                const char = String.fromCharCode(e.which);
+                
+                // Check if Tamil character
+                if (char && containsTamilScript(char)) {
+                    e.preventDefault();
+                    inputError.textContent = '❌ Tamil characters not allowed in English Mode';
+                    inputError.style.color = '#ffcdd2';
+                    inputError.style.display = 'block';
+                    setTimeout(() => {
+                        inputError.style.display = 'none';
+                    }, 2000);
+                    return false;
+                }
+                
+                return true;
+            });
+
+            messageInput.addEventListener('paste', function(e) {
+                const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+                
+                if (containsTamilScript(pastedText) || containsTanglish(pastedText)) {
+                    e.preventDefault();
+                    inputError.textContent = '❌ Tamil/Tanglish text cannot be pasted in English Mode';
+                    inputError.style.color = '#ffcdd2';
+                    inputError.style.display = 'block';
+                    setTimeout(() => {
+                        inputError.style.display = 'none';
+                    }, 3000);
+                    return false;
+                }
+            });
+        }
+
+        // ===== SEND MESSAGE HANDLER =====
+        sendBtn.addEventListener('click', function() {
+            const messageContent = messageInput.value.trim();
+            
+            if (!messageContent) {
+                inputError.textContent = '⚠️ Message cannot be empty';
+                inputError.style.color = '#ff9800';
+                inputError.style.display = 'block';
+                return;
+            }
+
+            // Validate based on mode
+            if (userLanguageMode === 'english') {
+                const validation = isValidEnglishOnly(messageContent);
+                if (!validation.valid) {
+                    inputError.textContent = validation.error;
+                    inputError.style.color = '#ffcdd2';
+                    inputError.style.display = 'block';
+                    return;
+                }
+            }
+
+            console.log('[SEND] Sending message in', userLanguageMode, 'mode:', messageContent);
+            sendMessage(messageContent);
+        });
+
+        // ===== ENTER KEY TO SEND =====
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendBtn.click();
+            }
+        });
+    });
+
+    // ===== TRANSLATE TO TAMIL FUNCTION =====
+    async function translateToTamil(englishText) {
+        if (containsTamilScript(englishText)) {
+            return englishText; // Already Tamil
+        }
+
+        try {
+            const response = await fetch(`/group/${groupCode}/translate/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                },
+                body: JSON.stringify({
+                    message: englishText,
+                    target_language: 'Tamil',
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success && data.translated_text) {
+                    console.log('[TRANSLATE] Success:', data.translated_text);
+                    return data.translated_text;
+                }
+            }
+        } catch (err) {
+            console.error('[TRANSLATE] API error:', err);
+        }
+
+        return englishText; // Return original if translation fails
+    }
+
+    // ===== SEND MESSAGE FUNCTION =====
+    function sendMessage(content) {
+        const messageInput = document.getElementById('messageInput');
+        const inputError = document.getElementById('inputError');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Disable UI during send
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.append('message', content);  // Backend expects 'message' parameter
+
+        fetch(`/group/${groupCode}/send-message/`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            }
+        })
+        .then(response => {
+            if (response.status === 410) {
+                // Group deleted
+                console.warn('Group deleted');
+                alert('Group was deleted. Redirecting...');
+                setTimeout(() => { window.location.href = '/chat/'; }, 1000);
+                return;
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success || data.status === 'success') {
+                console.log('[SEND] Message sent successfully');
+                messageInput.value = '';
+                inputError.style.display = 'none';
+                
+                // Fetch new messages
+                fetchNewMessages();
+            } else if (data.status === 'language_violation') {
+                console.error('[SEND] Language validation error:', data.error);
+                inputError.textContent = '❌ ' + (data.error || 'Language validation failed');
+                inputError.style.color = '#ffcdd2';
+                inputError.style.display = 'block';
+            } else {
+                console.error('[SEND] Failed to send:', data.error);
+                inputError.textContent = '❌ Failed to send: ' + (data.error || 'Unknown error');
+                inputError.style.color = '#ffcdd2';
+                inputError.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('[SEND] Error:', error);
+            inputError.textContent = '❌ Error sending message';
+            inputError.style.color = '#ffcdd2';
+            inputError.style.display = 'block';
+        })
+        .finally(() => {
+            // Re-enable UI
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            messageInput.focus();
+        });
+    }
+    
+    let selectedMessage = null;
+    let longPressTimer = null;
+
+    // === CONTEXT MENU & MESSAGE ACTIONS ===
+    document.addEventListener('contextmenu', function(e) {
+        const messageBubble = e.target.closest('.message-bubble');
+        if (messageBubble) {
+            e.preventDefault();
+            showContextMenu(e, messageBubble);
+        }
+    });
+
+    // Long-press detection for mobile
+    document.addEventListener('touchstart', function(e) {
+        if (e.target.closest('.message-bubble')) {
+            longPressTimer = setTimeout(function() {
+                showContextMenu(e.touches[0], e.target.closest('.message-bubble'));
+            }, 600);
+        }
+    }, false);
+
+    document.addEventListener('touchend', function() {
+        clearTimeout(longPressTimer);
+    }, false);
+
+    function showContextMenu(event, messageBubble) {
+        selectedMessage = messageBubble;
+        const contextMenu = document.getElementById('contextMenu');
+        const deleteForAllOption = document.getElementById('deleteForAllOption');
+        
+        // Show "Delete for everyone" option only if it's sender's message
+        if (messageBubble.dataset.isSender === 'true') {
+            deleteForAllOption.style.display = 'block';
+        } else {
+            deleteForAllOption.style.display = 'none';
+        }
+
+        // Show copy option only for text messages
+        const copyOption = document.getElementById('copyOption');
+        if (messageBubble.querySelector('.message-content')) {
+            copyOption.style.display = 'block';
+        } else {
+            copyOption.style.display = 'none';
+        }
+
+        contextMenu.classList.add('active');
+        const x = event.clientX || event.pageX;
+        const y = event.clientY || event.pageY;
+        contextMenu.style.left = x + 'px';
+        contextMenu.style.top = y + 'px';
+    }
+
+    function hideContextMenu() {
+        document.getElementById('contextMenu').classList.remove('active');
+        selectedMessage = null;
+    }
+
+    function copyMessage() {
+        if (!selectedMessage) return;
+        const messageContent = selectedMessage.querySelector('.message-content');
+        if (messageContent) {
+            navigator.clipboard.writeText(messageContent.textContent);
+            alert('Message copied to clipboard!');
+            hideContextMenu();
+        }
+    }
+
+    function showDeleteDialog() {
+        document.getElementById('deleteDialog').classList.add('active');
+    }
+
+    function hideDeleteDialog() {
+        document.getElementById('deleteDialog').classList.remove('active');
+        hideContextMenu();
+    }
+
+    function confirmDelete() {
+        if (!selectedMessage) return;
+        const messageId = selectedMessage.dataset.messageId;
+        const deleteType = document.querySelector('input[name="delete-type"]:checked').value;
+
+        const formData = new FormData();
+        formData.append('message_id', messageId);
+        formData.append('delete_type', deleteType);
+
+        fetch(`/group/${groupCode}/delete-message/`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (deleteType === 'for_me' || data.status === 'deleted_for_all') {
+                    selectedMessage.classList.add('deleted');
+                    const content = selectedMessage.querySelector('.message-content');
+                    if (content) {
+                        content.innerHTML = '<em>This message was deleted</em>';
+                    }
+                }
+                hideDeleteDialog();
+            } else {
+                alert('Error deleting message: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.context-menu') && !e.target.closest('.message-bubble')) {
+            hideContextMenu();
+        }
+    });
+
+    // === VOICE RECORDING (IMPROVED) ===
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let recordingStartTime;
+    let isInitializing = false;
+    let audioStream = null; // Track stream for cleanup
+
+    const micBtn = document.getElementById('micBtn');
+    const recordingIndicator = document.getElementById('recordingIndicator');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // Check if browser supports MediaRecorder
+    const isMediaRecorderSupported = () => {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    };
+
+    // Check and get supported MIME type
+    function getSupportedMimeType() {
+        const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+            'audio/wav',
+            'audio/aac'
+        ];
+        
+        for (let mimeType of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                console.log('Supported MIME type:', mimeType);
+                return mimeType;
+            }
+        }
+        
+        // Fallback to default if none supported
+        console.warn('No specific MIME type supported, using default');
+        return '';
+    }
+
+    async function initializeAudio(retryCount = 0) {
+        if (isInitializing) {
+            console.debug('Audio initialization already in progress');
+            return;
+        }
+
+        if (!isMediaRecorderSupported()) {
+            console.error('MediaRecorder not supported in this browser');
+            alert('Voice recording is not supported in your browser. Please use Chrome, Firefox, or Edge.');
+            return;
+        }
+
+        isInitializing = true;
+
+        try {
+            console.log('Requesting microphone access (attempt ' + (retryCount + 1) + ')');
+            
+            // Request microphone with specific constraints
+            const constraints = {
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 16000 // 16kHz is good for speech
+                }
+            };
+            
+            audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log('✓ Microphone access granted');
+            
+            // Get supported MIME type
+            const mimeType = getSupportedMimeType();
+            const recorderOptions = mimeType ? { mimeType: mimeType } : {};
+            
+            try {
+                mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+                console.log('✓ MediaRecorder created with MIME type:', mimeType || 'default');
+            } catch (error) {
+                console.warn('Failed to create MediaRecorder with options:', error);
+                // Fallback: create without options
+                mediaRecorder = new MediaRecorder(audioStream);
+                console.log('✓ MediaRecorder created with default settings');
+            }
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    audioChunks.push(event.data);
+                    console.log('Audio data chunk received, size:', event.data.size);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                console.log('MediaRecorder stopped, chunks:', audioChunks.length);
+                if (audioChunks.length > 0) {
+                    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    console.log('Audio blob created, size:', audioBlob.size);
+                    sendVoiceMessage(audioBlob);
+                    audioChunks = [];
+                } else {
+                    console.warn('No audio chunks recorded');
+                    alert('No audio recorded. Please try again.');
+                }
+            };
+
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                alert('Error recording audio: ' + event.error);
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+            };
+
+            console.log('✓ Audio initialization successful');
+            isInitializing = false;
+        } catch (error) {
+            console.error('Microphone initialization error:', error.name, error.message);
+            
+            // Provide specific error messages
+            if (error.name === 'NotAllowedError') {
+                alert('Microphone access was denied. Please enable microphone permissions in your browser settings and try again.');
+            } else if (error.name === 'NotFoundError') {
+                alert('No microphone found. Please connect a microphone and try again.');
+            } else if (error.name === 'NotReadableError') {
+                alert('Microphone is being used by another application. Please close other apps using the microphone.');
+            } else if (error.name === 'SecurityError') {
+                alert('HTTPS is required for microphone access. Please use a secure connection.');
+            } else {
+                alert('Microphone access failed: ' + error.message);
+            }
+            
+            // Retry once if it's a recoverable error
+            if (retryCount < 1 && (error.name === 'NotReadableError' || error.name === 'AbortError')) {
+                console.log('Retrying audio initialization...');
+                setTimeout(() => initializeAudio(retryCount + 1), 1000);
+            } else {
+                isInitializing = false;
+            }
+        }
+    }
+
+    // Function to cleanup audio stream
+    function cleanupAudioStream() {
+        if (audioStream) {
+            audioStream.getTracks().forEach(track => {
+                track.stop();
+                console.log('Audio track stopped:', track.kind);
+            });
+            audioStream = null;
+        }
+    }
+
+    micBtn.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        console.log('Mic button mouse down');
+        
+        // Check browser support first
+        if (!isMediaRecorderSupported()) {
+            alert('Voice recording is not supported in your browser.');
+            return;
+        }
+        
+        if (!mediaRecorder) {
+            console.log('MediaRecorder not initialized, initializing now...');
+            await initializeAudio();
+            // Wait a moment for initialization to complete
+            if (!mediaRecorder) {
+                console.error('Failed to initialize MediaRecorder');
+                return;
+            }
+        }
+
+        // Check if stream is still active
+        if (!mediaRecorder.stream || !mediaRecorder.stream.active) {
+            console.log('Audio stream not active, reinitializing...');
+            cleanupAudioStream();
+            mediaRecorder = null;
+            await initializeAudio();
+            if (!mediaRecorder) return;
+        }
+
+        if (!isRecording) {
+            try {
+                console.log('Starting recording...');
+                audioChunks = [];
+                isRecording = true;
+                recordingStartTime = Date.now();
+                mediaRecorder.start();
+                
+                micBtn.classList.add('recording');
+                recordingIndicator.style.display = 'flex';
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                console.log('✓ Recording started');
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                alert('Failed to start recording: ' + error.message);
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+            try {
+                console.log('Stopping recording...');
+                isRecording = false;
+                const recordingDuration = (Date.now() - recordingStartTime) / 1000;
+                console.log('Recording duration:', recordingDuration.toFixed(2), 'seconds');
+                mediaRecorder.stop();
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                console.log('✓ Recording stopped');
+            } catch (error) {
+                console.error('Error stopping recording:', error);
+                alert('Error stopping recording: ' + error.message);
+            }
+        }
+    });
+
+    micBtn.addEventListener('touchstart', async (e) => {
+        e.preventDefault();
+        console.log('Mic button touch start');
+        
+        if (!isMediaRecorderSupported()) {
+            alert('Voice recording is not supported in your browser.');
+            return;
+        }
+        
+        if (!mediaRecorder) {
+            console.log('MediaRecorder not initialized, initializing now...');
+            await initializeAudio();
+            if (!mediaRecorder) return;
+        }
+
+        if (!mediaRecorder.stream || !mediaRecorder.stream.active) {
+            console.log('Audio stream not active, reinitializing...');
+            cleanupAudioStream();
+            mediaRecorder = null;
+            await initializeAudio();
+            if (!mediaRecorder) return;
+        }
+
+        if (!isRecording) {
+            try {
+                console.log('Starting touch recording...');
+                audioChunks = [];
+                isRecording = true;
+                recordingStartTime = Date.now();
+                mediaRecorder.start();
+                
+                micBtn.classList.add('recording');
+                recordingIndicator.style.display = 'flex';
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                console.log('✓ Touch recording started');
+            } catch (error) {
+                console.error('Error starting touch recording:', error);
+                alert('Failed to start recording: ' + error.message);
+                isRecording = false;
+            }
+        }
+    });
+
+    document.addEventListener('touchend', () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+            try {
+                console.log('Stopping touch recording...');
+                isRecording = false;
+                const recordingDuration = (Date.now() - recordingStartTime) / 1000;
+                console.log('Touch recording duration:', recordingDuration.toFixed(2), 'seconds');
+                mediaRecorder.stop();
+                micBtn.classList.remove('recording');
+                recordingIndicator.style.display = 'none';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                console.log('✓ Touch recording stopped');
+            } catch (error) {
+                console.error('Error stopping touch recording:', error);
+                alert('Error stopping recording: ' + error.message);
+            }
+        }
+    });
+
+    async function sendVoiceMessage(audioBlob) {
+        console.log('Sending voice message, blob size:', audioBlob.size);
+        
+        if (audioBlob.size === 0) {
+            alert('Audio recording is empty. Please try again.');
+            return;
+        }
+        
+        if (audioBlob.size > 50 * 1024 * 1024) { // 50MB limit
+            alert('Audio file is too large (max 50MB). Please record a shorter message.');
+            return;
+        }
+        
+        const duration = (Date.now() - recordingStartTime) / 1000;
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'voice_message.webm');
+        formData.append('duration', Math.round(duration));
+        formData.append('audio_mime_type', mediaRecorder.mimeType || 'audio/webm');
+
+        // Disable UI during upload
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+        micBtn.disabled = true;
+
+        try {
+            console.log('Uploading voice message to /group/' + groupCode + '/upload-voice/');
+            console.log('MIME type:', mediaRecorder.mimeType || 'audio/webm');
+            const response = await fetch(`/group/${groupCode}/upload-voice/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                alert('Group was deleted due to inactivity. Redirecting...');
+                setTimeout(() => { window.location.href = '/chat/'; }, 1000);
+                return;
+            }
+
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                console.log('✓ Voice message uploaded successfully to server');
+                console.log('Audio MIME type saved:', data.audio_mime_type);
+                console.log('Audio URL:', data.audio_url);
+                
+                // Fetch new messages IMMEDIATELY to display voice message without delay
+                console.log('Fetching new messages immediately after upload...');
+                await fetchNewMessages();
+                
+                // Retry fetch if message not found (in case of slight DB delay)
+                const messagesScroll = document.getElementById('messagesScroll');
+                const lastChild = messagesScroll?.lastElementChild;
+                const isMessageVisible = lastChild?.querySelector('audio') ? true : false;
+                
+                if (!isMessageVisible && lastChild) {
+                    console.log('Voice message not yet visible in DOM, retrying fetch in 200ms...');
+                    setTimeout(fetchNewMessages, 200);
+                }
+            } else {
+                const errorMsg = data.error || 'Unknown error';
+                console.error('Voice message upload failed:', errorMsg);
+                alert('Failed to send voice message: ' + errorMsg);
+            }
+        } catch (error) {
+            console.error('Error sending voice message:', error);
+            alert('Error sending voice message: ' + error.message);
+        } finally {
+            // Re-enable UI
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            micBtn.disabled = false;
+        }
+    }
+
+    // Cleanup audio stream on page unload
+    window.addEventListener('beforeunload', () => {
+        if (isRecording && mediaRecorder) {
+            mediaRecorder.stop();
+        }
+        cleanupAudioStream();
+    });
+
+    // === AUDIO PLAYBACK ===
+    let currentAudio = null;
+    let currentPlayPromise = null; // Track current play promise
+    const audioPlaybackHandlers = new Map();
+
+    function togglePlayPause(event, button) {
+        event.preventDefault();
+
+        const messageBubble = button.closest('.message-bubble');
+        const audio = messageBubble.querySelector('audio');
+
+        if (!audio) {
+            console.error('No audio element found');
+            alert('Audio element not found. Please try refreshing the page.');
+            return;
+        }
+
+        // Stop previous audio if playing a different one
+        if (currentAudio && currentAudio !== audio && !currentAudio.paused) {
+            console.log('Stopping previous audio...');
+            try {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            } catch (e) {
+                console.warn('Error stopping previous audio:', e);
+            }
+            const otherBtn = currentAudio.closest('.message-bubble')?.querySelector('.play-btn');
+            if (otherBtn) {
+                otherBtn.textContent = '▶️';
+            }
+        }
+
+        // Play audio
+        if (audio.paused) {
+            console.log('Starting playback...');
+            console.log('Audio source:', audio.querySelector('source')?.src);
+            console.log('Audio MIME type:', audio.querySelector('source')?.type);
+            
+            // Store the play promise to prevent interruption
+            currentPlayPromise = audio.play();
+            
+            currentPlayPromise
+                .then(() => {
+                    console.log('✓ Audio playback started successfully');
+                    button.textContent = '⏸️';
+                    currentAudio = audio;
+                    currentPlayPromise = null;
+
+                    // Remove old event listeners if they exist
+                    if (audioPlaybackHandlers.has(audio)) {
+                        const handlers = audioPlaybackHandlers.get(audio);
+                        try {
+                            audio.removeEventListener('timeupdate', handlers.timeupdate);
+                            audio.removeEventListener('ended', handlers.ended);
+                            audio.removeEventListener('error', handlers.error);
+                        } catch (e) {
+                            console.warn('Error removing old listeners:', e);
+                        }
+                    }
+
+                    // Add new event listeners
+                    const timeUpdateHandler = function() { updateProgressBar.call(this); };
+                    const endedHandler = function() {
+                        button.textContent = '▶️';
+                        updateProgressBar.call(this);
+                        console.log('✓ Audio playback finished');
+                    };
+                    const errorHandler = function(e) {
+                        console.error('Audio media error:', e);
+                        console.error('Error details:', {
+                            code: e.target.error?.code,
+                            message: e.target.error?.message,
+                            src: audio.querySelector('source')?.src,
+                            type: audio.querySelector('source')?.type
+                        });
+                        button.textContent = '▶️';
+                        alert('Error playing audio: ' + (e.target.error?.message || 'Unknown error. Try refreshing the page.'));
+                    };
+
+                    audio.addEventListener('timeupdate', timeUpdateHandler);
+                    audio.addEventListener('ended', endedHandler);
+                    audio.addEventListener('error', errorHandler);
+
+                    audioPlaybackHandlers.set(audio, {
+                        timeupdate: timeUpdateHandler,
+                        ended: endedHandler,
+                        error: errorHandler
+                    });
+                })
+                .catch(err => {
+                    // Clear the promise reference
+                    currentPlayPromise = null;
+                    
+                    // Ignore "interrupted" and "NotAllowedError" - expected when user switches fast
+                    if (err.name === 'NotAllowedError') {
+                        // This includes "interrupted by pause()" and other autoplay policy errors
+                        console.debug('Play request blocked (expected):', err.message);
+                        button.textContent = '▶️'; // Reset button state
+                        return;
+                    }
+
+                    // Only show alert for unexpected errors
+                    console.error('Playback error:', err);
+                    console.error('Error details:', {
+                        name: err.name,
+                        message: err.message,
+                        src: audio.querySelector('source')?.src,
+                        type: audio.querySelector('source')?.type
+                    });
+                    button.textContent = '▶️';
+                    
+                    if (err.name !== 'AbortError') { // AbortError is also expected
+                        alert('Error playing audio: ' + err.message);
+                    }
+                });
+        } else {
+            // Pause audio - only pause after any pending play promise settles
+            console.log('Pausing audio...');
+            
+            // Always pause immediately for better UX
+            try {
+                audio.pause();
+                currentPlayPromise = null;
+            } catch (e) {
+                console.error('Error pausing audio:', e);
+            }
+            button.textContent = '▶️';
+        }
+    }
+
+    function updateProgressBar() {
+        const messageBubble = this.closest('.message-bubble');
+        if (!messageBubble) return;
+
+        const progressFill = messageBubble.querySelector('.progress-fill');
+        const durationText = messageBubble.querySelector('.duration-text');
+
+        if (this.duration && !isNaN(this.duration)) {
+            const progress = (this.currentTime / this.duration) * 100;
+            progressFill.style.width = progress + '%';
+
+            const remaining = this.duration - this.currentTime;
+            durationText.textContent = Math.ceil(remaining) + 's';
+        }
+    }
+
+    function seekAudio(event, progressBar) {
+        const messageBubble = progressBar.closest('.message-bubble');
+        const audio = messageBubble.querySelector('audio');
+
+        if (audio && !isNaN(audio.duration)) {
+            const rect = progressBar.getBoundingClientRect();
+            const percent = (event.clientX - rect.left) / rect.width;
+            audio.currentTime = percent * audio.duration;
+            updateProgressBar.call(audio);
+        }
+    }
+
+    // Custom template filter helper
+    const getUserStatus = (onlineUsers, user) => {
+        return onlineUsers.find(u => u.user.id === user.id) || { is_online: false, last_seen: new Date() };
+    };
+
+    // === LIVE UPDATES - REAL-TIME MESSAGE POLLING ===
+    let lastUpdateTimestamp = '{{ last_message_timestamp }}' || new Date(Date.now() - 60000).toISOString();
+    let pollInterval = 1000; // Start with 1 second
+    let maxPollInterval = 3000; // Max 3 seconds
+    let pollIntervalId = null;
+    let noNewMessagesCount = 0;
+    let isPolling = false; // Prevent concurrent polling requests
+
+    function formatTime(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    function createMessageElement(msg) {
+        const isSender = msg.is_sender;
+        const timestamp = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        
+        let messageHTML = `<div class="message-group ${isSender ? 'sender' : 'receiver'}">
+            <div class="message-bubble ${isSender ? 'sender' : 'receiver'} ${msg.is_deleted === 'deleted_for_all' ? 'deleted' : ''}" 
+                 data-message-id="${msg.id}" 
+                 data-is-sender="${isSender}">`;
+
+        if (!isSender) {
+            messageHTML += `
+                <div class="message-header">
+                    <b>${msg.user_name}</b>
+                </div>`;
+        }
+
+        if (msg.message_type === 'text') {
+            if (msg.is_deleted === 'deleted_for_all') {
+                messageHTML += `<div class="message-content"><em>This message was deleted</em></div>`;
+            } else {
+                messageHTML += `
+                <div class="message-content" data-original="${escapeHtml(msg.content)}">
+                    ${escapeHtml(msg.content)}
+                </div>
+                <div class="message-translate-btn-container">
+                    <button class="translate-btn" onclick="translateMessage(event, ${msg.id}, '${msg.content.replace(/'/g, "\\'")}', this)" 
+                            title="Translate this message">🌐 Translate</button>
+                </div>
+                <div class="message-translated" id="translated-${msg.id}" style="display: none; margin-top: 8px; font-style: italic; color: rgba(255,255,255,0.7); padding: 8px 0;"></div>
+                `;
+            }
+        } else if (msg.message_type === 'voice') {
+            const mimeType = msg.audio_mime_type || 'audio/webm';
+            // Get fallback MIME types based on primary format
+            let fallbackMimeTypes = [];
+            if (mimeType.includes('webm') || mimeType.includes('opus')) {
+                fallbackMimeTypes = ['audio/webm', 'audio/ogg;codecs=opus'];
+            } else if (mimeType.includes('mp4') || mimeType.includes('aac')) {
+                fallbackMimeTypes = ['audio/mp4', 'audio/aac'];
+            } else if (mimeType.includes('ogg')) {
+                fallbackMimeTypes = ['audio/ogg', 'audio/webm'];
+            } else if (mimeType.includes('wav')) {
+                fallbackMimeTypes = ['audio/wav', 'audio/webm'];
+            } else {
+                fallbackMimeTypes = ['audio/webm', 'audio/ogg', 'audio/mp4'];
+            }
+            
+            messageHTML += `
+                <div class="voice-message">
+                    <div class="voice-controls">
+                        <button class="play-btn" onclick="togglePlayPause(event, this)" title="Play audio">▶️</button>
+                    </div>
+                    <div class="voice-progress">
+                        <div class="progress-bar" onclick="seekAudio(event, this)">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+                    <div class="voice-duration">
+                        <span class="duration-text">${msg.duration || 0}s</span>
+                    </div>
+                    <audio style="display: none;" data-duration="${msg.duration}">
+                        <source src="${msg.audio_url}" type="${mimeType}">`;
+            
+            // Add fallback MIME types
+            for (let fallbackType of fallbackMimeTypes) {
+                if (fallbackType !== mimeType) {
+                    messageHTML += `<source src="${msg.audio_url}" type="${fallbackType}">`;
+                }
+            }
+            
+            messageHTML += `
+                        Your browser does not support the audio element.
+                    </audio>
+                </div>`;
+        }
+
+        messageHTML += `<span class="message-time">${timestamp}</span>
+            </div>
+        </div>`;
+
+        return messageHTML;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Get user's selected language from session
+    function getUserLanguage() {
+        // This will be set from Django session on page load
+        return document.body.dataset.userLanguage || 'English';
+    }
+
+    async function translateMessage(event, messageId, originalText, buttonElement) {
+      
+        try {
+            event.preventDefault();
+            
+            const targetLanguage = getUserLanguage();
+            const groupCode = document.body.dataset.groupCode;
+            const translatedDiv = document.getElementById(`translated-${messageId}`);
+            
+            // Show loading state
+            buttonElement.classList.add('loading');
+            buttonElement.disabled = true;
+            buttonElement.textContent = '⏳ Translating...';
+            
+            const formData = new FormData();
+            formData.append('text', originalText);
+            formData.append('language', targetLanguage);
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+            
+            const response = await fetch(`/group/${groupCode}/translate/`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.translated && data.translated !== originalText) {
+                translatedDiv.textContent = `🌐 ${targetLanguage}: ${data.translated}`;
+                translatedDiv.style.display = 'block';
+                buttonElement.textContent = '✓ Translated';
+                buttonElement.style.background = 'rgba(76, 175, 80, 0.3)';
+                buttonElement.style.borderColor = 'rgba(76, 175, 80, 0.6)';
+                buttonElement.style.color = 'rgba(76, 175, 80, 0.9)';
+            } else {
+                translatedDiv.textContent = `Translation returned same text (already in ${targetLanguage}?)`;
+                translatedDiv.style.display = 'block';
+                buttonElement.textContent = '🌐 Translate';
+                buttonElement.style.background = '';
+                buttonElement.style.borderColor = '';
+                buttonElement.style.color = '';
+            }
+            
+            console.log(`[TRANSLATE] Message ${messageId} translated successfully`);
+        } catch (error) {
+            console.error(`[TRANSLATE ERROR] Failed to translate message ${messageId}:`, error);
+            const translatedDiv = document.getElementById(`translated-${messageId}`);
+            translatedDiv.textContent = `⚠️ Translation failed: ${error.message}. Showing original text.`;
+            translatedDiv.style.display = 'block';
+            buttonElement.textContent = '❌ Translation failed';
+        } finally {
+            buttonElement.classList.remove('loading');
+            buttonElement.disabled = false;
+        }
+    }
+
+    async function fetchNewMessages() {
+        // Prevent concurrent polling requests
+        if (isPolling) {
+            console.debug('Polling already in progress, skipping request');
+            return;
+        }
+
+        isPolling = true;
+
+        try {
+            const response = await fetch(`/group/${groupCode}/get-messages/?since=${encodeURIComponent(lastUpdateTimestamp)}`);
+            
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                
+                // Show error message and redirect
+                const messagesScroll = document.getElementById('messagesScroll');
+                if (messagesScroll) {
+                    messagesScroll.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #d32f2f;">
+                            <h3>Group Deleted</h3>
+                            <p>This group was deleted due to inactivity (${data.reason}).</p>
+                            <p>Redirecting to chat...</p>
+                        </div>
+                    `;
+                }
+                
+                // Clear polling and redirect after 2 seconds
+                clearInterval(pollInterval);
+                setTimeout(() => {
+                    window.location.href = '/chat/';
+                }, 2000);
+                return;
+            }
+            
+            // CHECK: Other errors (404, 500, etc)
+            if (!response.ok) {
+                console.error(`API error: ${response.status} ${response.statusText}`);
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+
+            if (data.success && data.messages && data.messages.length > 0) {
+                const messagesScroll = document.getElementById('messagesScroll');
+                if (!messagesScroll) {
+                    console.error('Messages scroll container not found');
+                    return;
+                }
+
+                const emptyState = messagesScroll.querySelector('.empty-state');
+
+                // Remove empty state if it exists
+                if (emptyState) {
+                    emptyState.remove();
+                }
+
+                // Add new messages
+                data.messages.forEach(msg => {
+                    const messageHTML = createMessageElement(msg);
+                    messagesScroll.insertAdjacentHTML('beforeend', messageHTML);
+                });
+
+                // Update last timestamp
+                if (data.messages.length > 0) {
+                    lastUpdateTimestamp = data.messages[data.messages.length - 1].timestamp;
+                }
+
+                // Auto-scroll to bottom
+                scrollToBottom();
+                noNewMessagesCount = 0;
+
+                // Reset poll interval on successful message fetch
+                pollInterval = 1000;
+                console.log('Messages fetched, reset polling interval to 1s');
+            } else {
+                // No new messages, gradually increase polling interval
+                noNewMessagesCount++;
+                if (noNewMessagesCount > 3) {
+                    const oldInterval = pollInterval;
+                    pollInterval = Math.min(pollInterval + 500, maxPollInterval);
+                    console.debug(`No new messages (${noNewMessagesCount}x), increased poll interval to ${pollInterval}ms`);
+                }
+            }
+
+            // Update online count if available
+            if (data.online_count !== undefined) {
+                const onlineCountEl = document.querySelector('.online-count');
+                if (onlineCountEl) {
+                    onlineCountEl.textContent = data.online_count + ' Online';
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching new messages:', error);
+        } finally {
+            isPolling = false;
+        }
+    }
+
+    // Start polling for new messages with proper dynamic interval handling
+    // === USER STATUS HEARTBEAT - Keep-alive for auto-timeout detection ===
+    let heartbeatIntervalId = null;
+    let lastActivityTime = Date.now();
+
+    // Track user activity to reset heartbeat
+    document.addEventListener('mousemove', () => {
+        lastActivityTime = Date.now();
+    });
+    document.addEventListener('keypress', () => {
+        lastActivityTime = Date.now();
+    });
+    document.addEventListener('click', () => {
+        lastActivityTime = Date.now();
+    });
+
+    async function sendHeartbeat() {
+        try {
+            const formData = new FormData();
+            formData.append('is_online', 'true');
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+            const response = await fetch(`/group/${groupCode}/update-status/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                const data = await response.json();
+                console.warn('⚠️ Group deleted:', data.reason);
+                console.warn('Stopping heartbeat and redirecting...');
+                // Group deleted - stop polling and redirect
+                clearInterval(pollInterval);
+                return;  // Stop heartbeat interval
+            }
+
+            const data = await response.json();
+            if (data.success) {
+                console.debug('✓ Heartbeat sent, online_count:', data.online_count);
+            } else {
+                console.warn('Heartbeat failed:', data.error);
+            }
+        } catch (error) {
+            console.warn('Heartbeat error:', error);
+        }
+    }
+
+    function startHeartbeat() {
+        if (heartbeatIntervalId) {
+            console.log('Heartbeat already started');
+            return;
+        }
+
+        console.log('Starting user status heartbeat (every 30 seconds)...');
+        
+        // Send heartbeat immediately
+        sendHeartbeat();
+        
+        // Then every 30 seconds
+        heartbeatIntervalId = setInterval(() => {
+            if (!document.hidden) {
+                sendHeartbeat();
+            }
+        }, 30000); // 30 seconds
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatIntervalId) {
+            console.log('Stopping user status heartbeat...');
+            clearInterval(heartbeatIntervalId);
+            heartbeatIntervalId = null;
+        }
+    }
+
+    function startPolling() {
+        if (pollIntervalId) {
+            console.log('Polling already started');
+            return;
+        }
+
+        console.log('Starting message polling...');
+        
+        // Start heartbeat along with polling
+        startHeartbeat();
+
+        // Initial fetch
+        fetchNewMessages();
+
+        // Use a timer that recalculates the interval dynamically
+        function scheduleNextPoll() {
+            pollIntervalId = setTimeout(() => {
+                if (!document.hidden) {
+                    fetchNewMessages().then(() => {
+                        // Schedule next poll with current interval
+                        scheduleNextPoll();
+                    });
+                } else {
+                    // Page is hidden, reschedule
+                    scheduleNextPoll();
+                }
+            }, pollInterval);
+        }
+
+        scheduleNextPoll();
+    }
+
+    function stopPolling() {
+        if (pollIntervalId) {
+            console.log('Stopping message polling...');
+            clearTimeout(pollIntervalId);
+            pollIntervalId = null;
+        }
+        
+        // Also stop heartbeat
+        stopHeartbeat();
+    }
+
+    // Message submission handler function
+    let isSubmittingMessage = false;
+    let listenersInitialized = false; // Guard flag to prevent duplicate listeners
+    
+    // ===== TAMIL & TANGLISH DETECTION FUNCTIONS =====
+    /**
+     * Detect Tamil script characters (Unicode U+0B80 to U+0BFF)
+     */
+    function containsTamilScript(text) {
+        const TAMIL_START = 0x0B80;
+        const TAMIL_END = 0x0BFF;
+        
+        for (let char of text) {
+            const code = char.charCodeAt(0);
+            if (code >= TAMIL_START && code <= TAMIL_END) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Detect Tanglish (Tamil written in English letters)
+     * Checks for common Tamil phonetic patterns
+     */
+    function containsTanglish(text) {
+        // Common Tanglish patterns - Tamil words written phonetically in English
+        const tamilPatterns = [
+            /\b(vanakkam|namaskara|namaskar)\b/i,
+            /\b(saalama|salama|asalamu?alaikum)\b/i,
+            /\b(sollra|sollre|sollren|sollran)\b/i,
+            /\b(nee|naan|avan|ava|avanga|avangaluku)\b/i,
+            /\b(thamizh|tamil|tamizhaga)\b/i,
+            /\b(pesi|pesadhey|pesanum)\b/i,
+            /\b(veettu|vitu|vittadhu|vittom)\b/i,
+            /\b(ambi|ambil|ambuladhu)\b/i,
+            /\b(kudumbam|kudumba|kudumbathula)\b/i,
+            /\b(orupugai|orupukai)\b/i,
+            /\b(paravai|paravaigal)\b/i,
+            /\b(engal|endral)\b/i,
+            /\b(\w*kka\w*nu\b|\w*kk\w*aanen\b|\w*kkanum\b)/i,
+            /\b(\w*kkara\b|\w*kkira\b|\w*kkiradhu\b)/i,
+            /\b(seyyanum|seyyum)\b/i,
+            /\b(thaniya|thaniye|thaniyadhu)\b/i,
+            /\b(padikalam|padikalamnu|padikka)\b/i,
+            /\b(solren|sollran|solldren|sollren)\b/i,
+            /\b(enna|yenna|ennada|ennadi)\b/i,
+            /\b(yaar|yaarum|yaaruku|yaaru|yarre|yarukku)\b/i,
+            /\b(ethanai|ethana|ethanaikku)\b/i,
+            /\b(\w+ukka|\w+ukku|\w+kkum)\b/i,
+            /\b(\w+ane|\w+anu|\w+agum)\b/i,
+            /\b(\w+kku|\w+kka|\w+kkum)\b/i,
+            /\b(athu|athai|adhu|adhai|athukku|athukkaaga|adhukkum)\b/i,
+            /\b(innum|irundhalum|irundhadhu)\b/i,
+            /\b(\w*tt\w+|\w*nn\w+|\w*mm\w+|\w*pp\w+|l\w*ll\w+)\b/i,
+            /\b(da|thee|di|ma|pa|cha|thaa|paa)\b/i,
+            /\b(\w+andha?\b|\w+anda?\b|\w+uma?\b)/i,
+            /\bzhaa?i?\b/i,
+            /\bij?i\b/i,
+            /\b(sollvu|sollvachu|sollvom|kkodu|ddhum|ddhigal|kaara|kaaran|kaarum)\b/i,
+        ];
+        
+        for (let pattern of tamilPatterns) {
+            if (pattern.test(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Comprehensive validation for English-only messages
+     */
+    
+    function sendMessage() {
+        console.log('[SEND_MESSAGE] ===== FUNCTION START =====');
+        
+        // Prevent double submission
+        if (isSubmittingMessage) {
+            console.warn('[SEND_MESSAGE] Submission already in progress');
+            return false;
+        }
+
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageForm = document.getElementById('messageForm');
+        
+        if (!messageInput) {
+            console.error('[SEND_MESSAGE] Message input not found');
+            return false;
+        }
+        console.log('[SEND_MESSAGE] Message input found');
+        
+        if (!sendBtn) {
+            console.error('[SEND_MESSAGE] Send button not found');
+            return false;
+        }
+        console.log('[SEND_MESSAGE] Send button found');
+        
+        const message = messageInput.value.trim();
+        console.log('[SEND_MESSAGE] Raw input value:', messageInput.value);
+        console.log('[SEND_MESSAGE] After trim:', message);
+        console.log('[SEND_MESSAGE] Message length:', message.length);
+        console.log('[SEND_MESSAGE] Character codes:', [...message].map(c => c.charCodeAt(0)));
+
+        if (!message) {
+            console.debug('[SEND_MESSAGE] Message is empty, not sending');
+            console.log('[SEND_MESSAGE] Raw value length:', messageInput.value.length);
+            console.log('[SEND_MESSAGE] Raw value codes:', [...messageInput.value].map(c => c.charCodeAt(0)));
+            return false;
+        }
+
+        // Validate message length (max 5000 characters)
+        if (message.length > 5000) {
+            console.error('[SEND_MESSAGE] Message too long');
+            alert('Message is too long. Maximum 5000 characters allowed.');
+            return false;
+        }
+
+        // ===== CRITICAL: VALIDATE ENGLISH-ONLY (NO TAMIL OR TANGLISH) =====
+        const englishValidation = isValidEnglishOnly(message);
+        if (!englishValidation.valid) {
+            console.warn('[SEND_MESSAGE] ❌ Language violation detected:', englishValidation.error);
+            alert('⚠️ ' + englishValidation.error);
+            messageInput.value = '';  // Clear the input
+            messageInput.focus();
+            return false;
+        }
+
+        console.log('[SEND_MESSAGE] ✓ Message validation passed');
+        console.log('[SEND_MESSAGE] SENDING MESSAGE...');
+
+        // Disable submit button during submission
+        isSubmittingMessage = true;
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.6';
+
+        // Ensure form cannot be submitted during AJAX call
+        if (messageForm) {
+            messageForm.onsubmit = function(e) {
+                console.log('[SEND_MESSAGE] Form submission blocked during AJAX call');
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            };
+        }
+
+        const formData = new FormData();
+        formData.append('message', message);
+        console.log('[SEND_MESSAGE] FormData created with message');
+        
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (!csrfToken) {
+            console.error('[SEND_MESSAGE] CSRF token not found');
+            alert('Error: CSRF token missing');
+            isSubmittingMessage = false;
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
+            return false;
+        }
+        console.log('[SEND_MESSAGE] CSRF token found: ' + (csrfToken.value ? 'YES' : 'NO'));
+        console.log('[SEND_MESSAGE] Fetching to:', `/group/${groupCode}/send-message/`);
+
+        fetch(`/group/${groupCode}/send-message/`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': csrfToken.value
+            }
+        })
+        .then(response => {
+            console.log('[SEND_MESSAGE] Response status:', response.status);
+            
+            // CHECK: Group Deleted (410 Gone)
+            if (response.status === 410) {
+                return response.json().then(data => {
+                    console.warn('[SEND_MESSAGE] ⚠️ Group deleted:', data.reason);
+                    alert('Group was deleted due to inactivity. Redirecting...');
+                    setTimeout(() => { window.location.href = '/chat/'; }, 1000);
+                    throw new Error('GroupDeleted');
+                });
+            }
+            
+            if (!response.ok) {
+                console.error('[SEND_MESSAGE] Response not OK:', response.statusText);
+                console.error('[SEND_MESSAGE] Status code:', response.status);
+                return response.text().then(text => {
+                    console.error('[SEND_MESSAGE] Response body:', text);
+                    throw new Error(`HTTP error! status: ${response.status}, body: ${text}`);
+                });
+            }
+            return response.json().catch(err => {
+                console.error('[SEND_MESSAGE] Failed to parse JSON response');
+                console.error('[SEND_MESSAGE] Error:', err);
+                throw err;
+            });
+        })
+        .then(data => {
+            console.log('[SEND_MESSAGE] Response data:', data);
+            if (data.success) {
+                console.log('[SEND_MESSAGE] ✓ Message sent successfully');
+                console.log('[SEND_MESSAGE] Message ID:', data.message?.id);
+                messageInput.value = '';
+                messageInput.focus();
+                // Fetch new messages immediately
+                fetchNewMessages();
+                // Scroll to bottom after a brief delay
+                setTimeout(scrollToBottom, 100);
+            } else {
+                // Check for specific error statuses
+                if (data.status === 'language_violation' || data.status === 'language_violation_speech') {
+                    console.error('[SEND_MESSAGE] ❌ LANGUAGE VIOLATION:', data.error);
+                    alert('⚠️ ' + data.error);
+                    messageInput.value = '';
+                    messageInput.focus();
+                } else {
+                    const errorMsg = data.error || 'Unknown error';
+                    console.error('[SEND_MESSAGE] Server error:', errorMsg);
+                    alert('Error sending message: ' + errorMsg);
+                }
+            }
+        })
+        .catch(error => {
+            if (error.message === 'GroupDeleted') {
+                console.log('[SEND_MESSAGE] Group deleted, handled');
+                return;  // Already handled
+            }
+            console.error('[SEND_MESSAGE] Fetch error:', error);
+            alert('Error sending message: ' + error.message);
+        })
+        .finally(() => {
+            // Re-enable submit button
+            console.log('[SEND_MESSAGE] FINALLY: Resetting isSubmittingMessage flag');
+            isSubmittingMessage = false;
+            if (sendBtn) {
+                sendBtn.disabled = false;
+                sendBtn.style.opacity = '1';
+            }
+            console.log('[SEND_MESSAGE] ===== FUNCTION END =====\n');
+        });
+        
+        return false;
+    }
+
+    // Initialize event listeners when DOM is ready
+    function initializeEventListeners() {
+        // Guard flag to prevent duplicate listener attachment
+        if (listenersInitialized) {
+            console.log('[INIT_LISTENERS] Event listeners already initialized, skipping');
+            return;
+        }
+        
+        console.log('[INIT_LISTENERS] ===== STARTING INITIALIZATION =====');
+        
+        const messageForm = document.getElementById('messageForm');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        
+        if (!sendBtn) {
+            console.error('[INIT_LISTENERS] ❌ Send button not found');
+            return;
+        } else {
+            console.log('[INIT_LISTENERS] ✓ Send button found');
+        }
+        
+        if (!messageInput) {
+            console.error('[INIT_LISTENERS] ❌ Message input not found');
+            return;
+        } else {
+            console.log('[INIT_LISTENERS] ✓ Message input found');
+        }
+        
+        if (!messageForm) {
+            console.error('[INIT_LISTENERS] ❌ Message form not found');
+            return;
+        } else {
+            console.log('[INIT_LISTENERS] ✓ Message form found');
+        }
+        
+        // LAYER 1: Prevent form submission completely
+        messageForm.addEventListener('submit', function(e) {
+            console.log('[INIT_LISTENERS] LAYER-1: Form submit event intercepted');
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }, true); // Use capture phase to catch early
+        
+        // LAYER 2: Inline onsubmit handler as backup
+        messageForm.onsubmit = function(e) {
+            console.log('[INIT_LISTENERS] LAYER-2: Inline form onsubmit handler triggered');
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            return false;
+        };
+        
+        // LAYER 3: Send message on button click
+        sendBtn.addEventListener('click', function(e) {
+            console.log('[INIT_LISTENERS] LAYER-3: Send button clicked - calling sendMessage()');
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            sendMessage();
+            return false;
+        }, false);
+
+        // LAYER 4: Send message on Enter key press in input
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                console.log('[INIT_LISTENERS] LAYER-4: Enter key pressed - calling sendMessage()');
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                sendMessage();
+                return false;
+            }
+        }, false);
+        
+        // LAYER 5: Mobile touch support for button
+        if ('ontouchstart' in window) {
+            console.log('[INIT_LISTENERS] LAYER-5: Touch support detected, adding touchend listener');
+            sendBtn.addEventListener('touchend', function(e) {
+                console.log('[INIT_LISTENERS] LAYER-5: Send button touched - calling sendMessage()');
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                sendMessage();
+                return false;
+            }, false);
+        }
+        
+        // Mark as initialized to prevent re-attachment
+        listenersInitialized = true;
+        console.log('[INIT_LISTENERS] ✓ Event listeners initialized successfully (5 layers)');
+        console.log('[INIT_LISTENERS] ===== INITIALIZATION COMPLETE =====\n');
+    }
+
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        console.log('[DOM_READY] DOM still loading, waiting for DOMContentLoaded event');
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('[DOM_READY] ✓ DOMContentLoaded event fired');
+            initializeEventListeners();
+        });
+    } else {
+        // DOM is already loaded
+        console.log('[DOM_READY] DOM already loaded, initializing immediately');
+        initializeEventListeners();
+    }
+
+    // Start polling when page loads
+    window.addEventListener('load', function() {
+        startPolling();
+    });
+
+    // Stop polling when page is hidden
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            // Resume polling and fetch immediately
+            startPolling();
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        stopPolling();
+        // Update user status to offline
+        const formData = new FormData();
+        fetch(`/group/${groupCode}/update-status/`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            keepalive: true
+        }).catch(() => {});
+    });
+</script>
+
+<!-- Add custom filter to Django templates -->
+<script>
+    // Create a custom template tag to check if message is deleted for user
+    // This is handled in the view context already with is_deleted_for_user method
+</script>
+
+{% endblock %}

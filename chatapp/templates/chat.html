@@ -16,33 +16,13 @@
     }
 
     @keyframes slideInUp {
-        from {
-            opacity: 0;
-            transform: translateY(30px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+        from { opacity: 0; transform: translateY(30px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 
     .chat-header {
         text-align: center;
         margin-bottom: 2rem;
-        animation: fadeInDown 0.6s ease-out;
-    }
-
-    @keyframes fadeInDown {
-        from {
-            opacity: 0;
-            transform: translateY(-20px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
     }
 
     .chat-header h2 {
@@ -61,17 +41,6 @@
 
     .form-group {
         margin-bottom: 1.5rem;
-        animation: fadeIn 0.6s ease-out;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-        }
-
-        to {
-            opacity: 1;
-        }
     }
 
     .form-group label {
@@ -81,7 +50,8 @@
         font-weight: 600;
     }
 
-    .form-group input {
+    .form-group input,
+    .form-group select {
         width: 100%;
         padding: 1rem;
         border: 2px solid rgba(102, 126, 234, 0.3);
@@ -97,48 +67,18 @@
         color: rgba(255, 255, 255, 0.6);
     }
 
-    .form-group input:focus {
-        outline: none;
-        border-color: #667eea;
-        background: rgba(255, 255, 255, 0.15);
-        box-shadow: 0 0 15px rgba(102, 126, 234, 0.3);
-        transform: scale(1.02);
-    }
-
-    .form-group input:hover {
-        border-color: #764ba2;
-        background: rgba(255, 255, 255, 0.12);
-    }
-
-    .form-group select {
-        width: 100%;
-        padding: 1rem;
-        border: 2px solid rgba(102, 126, 234, 0.3);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        box-sizing: border-box;
-        cursor: pointer;
-    }
-
     .form-group select option {
         background: #2a2a3e;
         color: white;
     }
 
+    .form-group input:focus,
     .form-group select:focus {
         outline: none;
         border-color: #667eea;
         background: rgba(255, 255, 255, 0.15);
         box-shadow: 0 0 15px rgba(102, 126, 234, 0.3);
         transform: scale(1.02);
-    }
-
-    .form-group select:hover {
-        border-color: #764ba2;
-        background: rgba(255, 255, 255, 0.12);
     }
 
     .button-group {
@@ -157,8 +97,6 @@
         font-size: 0.9rem;
         cursor: pointer;
         transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
         min-height: 44px;
     }
 
@@ -166,36 +104,6 @@
         background: linear-gradient(90deg, #667eea, #764ba2);
         color: white;
         box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        animation: slideInLeft 0.6s ease-out 0.2s forwards;
-        opacity: 0;
-    }
-
-    @keyframes slideInLeft {
-        from {
-            opacity: 0;
-            transform: translateX(-30px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-
-    .submit-btn::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, #f093fb, #667eea);
-        z-index: -1;
-        transition: left 0.4s ease;
-    }
-
-    .submit-btn:hover::before {
-        left: 0;
     }
 
     .submit-btn:hover {
@@ -203,38 +111,16 @@
         box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
     }
 
-    .submit-btn:active {
-        transform: translateY(-1px);
-    }
-
     .back-btn {
         background: rgba(255, 255, 255, 0.1);
         color: white;
         border: 2px solid rgba(102, 126, 234, 0.3);
-        animation: slideInRight 0.6s ease-out 0.3s forwards;
-        opacity: 0;
-    }
-
-    @keyframes slideInRight {
-        from {
-            opacity: 0;
-            transform: translateX(30px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
     }
 
     .back-btn:hover {
         background: rgba(102, 126, 234, 0.2);
         border-color: #667eea;
         transform: scale(1.05);
-    }
-
-    .back-btn:active {
-        transform: scale(0.98);
     }
 
     .info-box {
@@ -244,83 +130,34 @@
         border-radius: 6px;
         margin-top: 1.2rem;
         color: rgba(255, 255, 255, 0.8);
-        animation: slideInUp 0.8s ease-out 0.4s forwards;
-        opacity: 0;
         font-size: 0.85rem;
-    }
-
-    @keyframes slideInUp {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
     }
 
     .info-box strong {
         color: white;
     }
 
-    /* ========== MOBILE MEDIA QUERIES ========== */
     @media (max-width: 768px) {
         .chat-container {
             max-width: 100%;
             margin: 2rem auto;
             padding: 1.5rem;
-            border-radius: 15px;
-            border: 1.5px solid rgba(102, 126, 234, 0.3);
         }
 
         .chat-header h2 {
             font-size: 1.6rem;
-            margin-bottom: 0.4rem;
         }
 
-        .chat-header p {
-            font-size: 0.9rem;
-        }
-
-        .form-group {
-            margin-bottom: 1.2rem;
-        }
-
-        .form-group label {
-            font-size: 0.95rem;
-            margin-bottom: 0.4rem;
-        }
-
-        .form-group input {
+        .form-group input,
+        .form-group select {
             padding: 0.85rem;
             font-size: 1rem;
-            border-radius: 8px;
-        }
-
-        .form-group input:focus {
-            transform: scale(1.01);
-        }
-
-        .button-group {
-            gap: 0.8rem;
-            margin-top: 1.5rem;
         }
 
         .submit-btn,
         .back-btn {
             padding: 0.9rem;
             font-size: 0.95rem;
-            border-radius: 8px;
-        }
-
-        .info-box {
-            padding: 0.9rem;
-            margin-top: 1.5rem;
-            border-left-width: 3px;
-            border-radius: 6px;
-            font-size: 0.9rem;
         }
     }
 
@@ -335,10 +172,6 @@
             font-size: 1.3rem;
         }
 
-        .chat-header p {
-            font-size: 0.8rem;
-        }
-
         .form-group {
             margin-bottom: 0.8rem;
         }
@@ -347,7 +180,8 @@
             font-size: 0.85rem;
         }
 
-        .form-group input {
+        .form-group input,
+        .form-group select {
             padding: 0.6rem 0.7rem;
             font-size: 0.9rem;
             min-height: 40px;
@@ -364,7 +198,6 @@
             width: 100%;
             padding: 0.6rem 0.7rem;
             font-size: 0.85rem;
-            min-height: 44px;
         }
 
         .info-box {
@@ -374,57 +207,12 @@
         }
     }
 
-    @media (max-width: 360px) {
-        .chat-container {
-            padding: 0.8rem;
-        }
-
-        .chat-header h2 {
-            font-size: 1.2rem;
-        }
-
-        .chat-header p {
-            font-size: 0.8rem;
-        }
-
-        .form-group label {
-            font-size: 0.85rem;
-        }
-
-        .form-group input {
-            font-size: 0.9rem;
-        }
-
-        .submit-btn,
-        .back-btn {
-            font-size: 0.85rem;
-        }
-    }
-
-    /* ========== TABLET MEDIA QUERIES ========== */
-    @media (min-width: 769px) and (max-width: 1024px) {
-        .chat-container {
-            max-width: 500px;
-            margin: 2.5rem auto;
-        }
-
-        .chat-header h2 {
-            font-size: 1.8rem;
-        }
-    }
-
-    /* ========== TOUCH-FRIENDLY INTERACTIONS ========== */
     @media (hover: none) and (pointer: coarse) {
-
         .form-group input,
         .submit-btn,
         .back-btn {
             min-height: 48px;
             padding: 0.75rem;
-        }
-
-        .submit-btn:hover::before {
-            left: 0;
         }
 
         .submit-btn:hover,
@@ -438,24 +226,11 @@
         }
     }
 
-    /* ========== ANIMATION PERFORMANCE ========== */
     @media (prefers-reduced-motion: reduce) {
         * {
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;
             transition-duration: 0.01ms !important;
-        }
-    }
-
-    /* ========== HIGH CONTRAST MODE ========== */
-    @media (prefers-contrast: more) {
-        .chat-container {
-            border: 2px solid rgba(102, 126, 234, 0.5);
-        }
-
-        .submit-btn,
-        .back-btn {
-            border-width: 2px;
         }
     }
 </style>
@@ -467,18 +242,18 @@
     </div>
 
     {% if error %}
-    <div
-        style="background: rgba(244, 67, 54, 0.2); border-left: 4px solid #f44336; padding: 1rem; border-radius: 8px; color: #ffcdd2; margin-bottom: 1.5rem;">
+    <div style="background: rgba(244, 67, 54, 0.2); border-left: 4px solid #f44336; padding: 1rem; border-radius: 8px; color: #ffcdd2; margin-bottom: 1.5rem;">
         {{ error }}
     </div>
     {% endif %}
 
-    <form method="POST">
+    <form method="POST" onsubmit="return validateChatForm(event)">
         {% csrf_token %}
 
         <div class="form-group">
             <label for="user_name">Your Name</label>
             <input type="text" id="user_name" name="user_name" placeholder="e.g., John, Alice" required>
+            <small id="nameError" style="color: #ffcdd2; display: none; margin-top: 0.3rem;">❌ Username must be English only (no Tamil or Tanglish)</small>
         </div>
 
         <div class="form-group">
@@ -487,25 +262,43 @@
         </div>
 
         <div class="form-group">
-            <label for="language">Language</label>
-            <select name="language" required>
+            <label for="language_mode">Group Input Language</label>
+            <select name="language_mode" id="language_mode" required>
                 <option value="">Select Language</option>
-                <option value="English">🌐 English</option>
-                <option value="Tamil">🇮🇳 Tamil</option>
+                <option value="english">🌐 English - Group accepts English input only</option>
+                <option value="tamil">🇮🇳 Tamil - Group accepts Tamil input only</option>
             </select>
+            <small style="color: rgba(255, 255, 255, 0.7); display: block; margin-top: 0.5rem;">
+                <strong>English:</strong> All users in this group must send messages in English only.
+                <br>
+                <strong>Tamil:</strong> All users in this group must send messages in Tamil only.
+            </small>
         </div>
 
-
         <div class="button-group">
-            <button type="submit" class="submit-btn">Enter Group 🚀</button>
-            <a href="/" class="back-btn">Back Home</a>
+            <button type="submit" class="submit-btn">✈️ Join Group</button>
+            <button type="button" class="back-btn" onclick="window.location.href='{% url 'home' %}'">← Back</button>
         </div>
     </form>
 
     <div class="info-box">
-        <strong>💡 Tip:</strong> Share the same group code with friends to join the same chat room! Your name will be
-        used as your display name in the chat.
+        <strong>💡 Tip:</strong> Create a new group by entering a unique code, or join an existing group with a known code.
     </div>
 </div>
+
+<script>
+    function validateChatForm(event) {
+        const nameInput = document.getElementById('user_name');
+        const nameError = document.getElementById('nameError');
+        
+        if (!/^[a-zA-Z0-9\s\-']+$/.test(nameInput.value.trim())) {
+            nameError.style.display = 'block';
+            event.preventDefault();
+            return false;
+        }
+        nameError.style.display = 'none';
+        return true;
+    }
+</script>
 
 {% endblock %}

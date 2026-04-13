@@ -1,12 +1,14 @@
 """
 Translation utility module for Google Gemini API integration.
 Provides functions to translate messages between supported languages.
+Handles Tamil/Tanglish normalization and message content formatting.
 """
 
 import os
 import logging
 import warnings
 import traceback
+import re
 from typing import Optional, Tuple
 
 # Suppress deprecation warning for google.generativeai
@@ -263,3 +265,258 @@ def get_translation_cache_key(message_id: int, target_language: str) -> str:
         Cache key string
     """
     return f"msg_translation_{message_id}_{target_language.lower()}"
+
+
+def detect_language(text: str) -> str:
+    """
+    Detect if text is in Tamil, Tanglish, or English.
+    
+    Args:
+        text: Text to analyze
+        
+    Returns:
+        Language type: 'tamil', 'tanglish', or 'english'
+    """
+    if not text or not isinstance(text, str):
+        return 'english'
+    
+    text = text.strip()
+    
+    # Tamil Unicode range: U+0B80 to U+0BFF
+    tamil_pattern = re.compile(r'[\u0B80-\u0BFF]')
+    tamil_char_count = len(tamil_pattern.findall(text))
+    
+    # Check if text contains significant Tamil characters
+    if tamil_char_count > len(text) * 0.3:  # More than 30% Tamil characters
+        return 'tamil'
+    
+    # Tanglish patterns: common Tamil words written in English
+    # Extended comprehensive list of Tamil words in English
+    tanglish_patterns = [
+        # Common Tamil greetings and expressions
+        r'\b(vanakkam|namaskar|namaste|ayyo|aiyyo|dei|bro|ra|la|da|ma|machi|machan|kitchdi)\b',
+        r'\b(nee|neenga|neeyum|neeya|naan|nanu|adhu|idhu|atha|idha|athaan|dhaan)\b',
+        r'\b(enna|enada|enadi|enadhu|epdi|epda|yeppadi|yaaru|yaari)\b',
+        r'\b(sari|sarie|saru|sare|sariyama|ok|okayy|okay|hmm|hm|uh|da|daa|pa|paa)\b',
+        r'\b(konjam|kondu|kupdu|koorum|koodei)\b',
+        r'\b(vera|verai|vendam|venda|vendaa|neeya|nei|neii|enaku|enakku|enalum)\b',
+        r'\b(vandha|vandhu|vandhuta|irundha|irukanu|irukkanu|irruku|irukka)\b',
+        r'\b(panna|pannadhu|pannicci|pannitu|pannitaan|pannaan|sonnaan|sonnaan)\b',
+        r'\b(solra|solren|solren|sollran|sollran|vituta|viduta|vidutam)\b',
+        r'\b(oru|rendo|moonru|naalu|aidu|aaru|yelu|ettu|tombai|patthu)\b',
+        r'\b(aandavan|devi|shiva|krishna|rama|ganesha)\b',
+        # Common Tanglish slang
+        r'\b(da|daa|di|di|yaar|super|vera|item|level|scene|mass|cool)\b',
+    ]
+    
+    text_lower = text.lower()
+    tanglish_score = 0
+    word_tokens = text_lower.split()
+    
+    # Check each word against Tanglish patterns
+    for pattern in tanglish_patterns:
+        matches = re.findall(pattern, text_lower)
+        tanglish_score += len(matches)
+    
+    # If we have substantial Tanglish word matches and no/minimal Tamil script, it's Tanglish
+    if tanglish_score >= 2 and tamil_char_count == 0:
+        return 'tanglish'
+    
+    # If only one Tanglish word but it's in context (not just random English)
+    if tanglish_score >= 1 and len(word_tokens) <= 10 and tamil_char_count == 0:
+        # Check if it's really Tanglish or just English with a Tamil word
+        english_word_count = 0
+        for word in word_tokens:
+            if word.lower() in ['how', 'are', 'you', 'i', 'me', 'is', 'am', 'the', 'a', 'an', 
+                                'what', 'when', 'where', 'why', 'which', 'who', 'can', 'do', 'will',
+                                'would', 'should', 'could', 'is', 'be', 'been', 'have', 'has']:
+                english_word_count += 1
+        
+        # If mostly Tamil words with some English, it's Tanglish
+        if english_word_count < len(word_tokens) * 0.7 and tanglish_score > 0:
+            return 'tanglish'
+    
+    # Otherwise, treat as English
+    return 'english'
+
+
+def normalize_to_professional_english(text: str, user_language: str = 'English') -> Tuple[bool, str, str]:
+    """
+    Normalize user input to professional English.
+    Handles Tamil, Tanglish, and casual English inputs.
+    
+    Args:
+        text: User input text
+        user_language: User's preferred language (for context)
+        
+    Returns:
+        Tuple of (success, normalized_text, message)
+    """
+    print(f"\n[NORMALIZE_START] Input: '{text[:50]}...' User language: '{user_language}'")
+    
+    if not text or not isinstance(text, str):
+        msg = "Invalid text provided"
+        print(f"[NORMALIZE_FAIL] {msg}")
+        return False, text, msg
+    
+    text = text.strip()
+    if len(text) == 0:
+        msg = "Text cannot be empty"
+        print(f"[NORMALIZE_FAIL] {msg}")
+        return False, text, msg
+    
+    if len(text) > 5000:
+        msg = "Text too long (max 5000 characters)"
+        print(f"[NORMALIZE_FAIL] {msg}")
+        return False, text, msg
+    
+    detected_lang = detect_language(text)
+    print(f"[NORMALIZE] Detected language: {detected_lang}")
+    
+    try:
+        if detected_lang == 'tamil':
+            msg = "Tamil text detected - translating to professional English"
+            print(f"[NORMALIZE] {msg}")
+            success, normalized, trans_msg = translate_text(text, 'English')
+            if success and normalized:
+                print(f"[NORMALIZE_SUCCESS] Tamil → Professional English")
+                return True, normalized, "Normalized from Tamil"
+            else:
+                print(f"[NORMALIZE_FALLBACK] Translation failed, using original text")
+                return False, text, "Translation failed, using original"
+        
+        elif detected_lang == 'tanglish':
+            msg = "Tanglish text detected - translating to professional English"
+            print(f"[NORMALIZE] {msg}")
+            success, normalized, trans_msg = translate_text(text, 'English')
+            if success and normalized:
+                print(f"[NORMALIZE_SUCCESS] Tanglish → Professional English")
+                return True, normalized, "Normalized from Tanglish"
+            else:
+                print(f"[NORMALIZE_FALLBACK] Translation failed, using original text")
+                return False, text, "Translation failed, using original"
+        
+        else:  # English
+            print(f"[NORMALIZE] English text - normalizing to professional format")
+            # Normalize casual English to professional English
+            success, normalized, norm_msg = normalize_english_text(text)
+            if success:
+                print(f"[NORMALIZE_SUCCESS] English normalized to professional format")
+                return True, normalized, norm_msg
+            else:
+                print(f"[NORMALIZE_FALLBACK] Normalization processing complete")
+                return True, normalized, norm_msg
+    
+    except Exception as e:
+        print(f"[NORMALIZE_EXCEPTION] Error during normalization: {str(e)}")
+        logger.error(f"Normalization error: {str(e)}")
+        return False, text, f"Normalization error: {str(e)}"
+
+
+def normalize_english_text(text: str) -> Tuple[bool, str, str]:
+    """
+    Normalize casual/slang English to professional English.
+    
+    Args:
+        text: English text to normalize
+        
+    Returns:
+        Tuple of (success, normalized_text, message)
+    """
+    if not text or not isinstance(text, str):
+        return False, text, "Invalid input"
+    
+    normalized = text.strip()
+    
+    # Common slang/casual expressions to professional mapping
+    casual_to_professional = {
+        r'\bu\b': 'you',
+        r'\br\b': 'are',
+        r'\bpls\b': 'please',
+        r'\bty\b': 'thank you',
+        r'\bthnx\b': 'thanks',
+        r'\bk\b': 'okay',
+        r'\btb\b': 'to be',
+        r'\bgr8\b': 'great',
+        r'\bhey\s+guys': 'hello everyone',
+        r'\bthnx\s+m8': 'thank you friend',
+        r'\bc\u0027mon': 'come on',
+        r'\bwanna\b': 'want to',
+        r'\bgonna\b': 'going to',
+        r'\bgotta\b': 'got to',
+        r'\bkinda\b': 'kind of',
+        r'\bsorta\b': 'sort of',
+        r'\bcuz\b': 'because',
+        r'\bfyi\b': 'for your information',
+        r'\blol\b': '',  # Remove LOL
+        r'\bhaha\b': '',  # Remove casual laughs
+        r'\bhehe\b': '',  # Remove casual laughs
+    }
+    
+    # Apply substitutions (case-insensitive)
+    for casual_pattern, professional in casual_to_professional.items():
+        normalized = re.sub(casual_pattern, professional, normalized, flags=re.IGNORECASE)
+    
+    # Fix multiple spaces
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    # Capitalize first letter of sentences
+    sentences = normalized.split('. ')
+    capitalized = '. '.join([s.capitalize() if s else s for s in sentences])
+    
+    return True, capitalized, "Normalized to professional English"
+
+
+def get_message_for_sender(content: str, normalized_content: str, user_language: str) -> Tuple[str, str]:
+    """
+    Get the message to display for the sender.
+    If user's language is Tamil and content is in English, translate it.
+    
+    Args:
+        content: Original message content (in professional English)
+        normalized_content: Normalized content (from storage)
+        user_language: User's preferred language
+        
+    Returns:
+        Tuple of (display_content, translation_source)
+    """
+    print(f"\n[GET_MESSAGE_SENDER] Language: {user_language}")
+    
+    display_content = content or normalized_content
+    
+    user_lang_normalized = user_language.strip().lower()
+    
+    # If sender's language is Tamil, show Tamil translation
+    if user_lang_normalized == 'tamil':
+        success, translated, msg = translate_text(content, 'Tamil')
+        if success and translated:
+            print(f"[GET_MESSAGE_SENDER] SUCCESS - Translated to Tamil for sender")
+            return translated, 'translated_for_sender'
+        else:
+            print(f"[GET_MESSAGE_SENDER] FALLBACK - Using original English")
+            return display_content, 'original'
+    
+    # English users see professional English
+    print(f"[GET_MESSAGE_SENDER] SUCCESS - Showing professional English")
+    return display_content, 'professional_english'
+
+
+def get_message_for_receiver(content: str, normalized_content: str) -> Tuple[str, str]:
+    """
+    Get the message to display for the receiver.
+    Always show professional English to ensure clarity.
+    
+    Args:
+        content: Original message content
+        normalized_content: Normalized professional English content
+        
+    Returns:
+        Tuple of (display_content, translation_source)
+    """
+    print(f"\n[GET_MESSAGE_RECEIVER] Preparing professional English for receiver")
+    
+    # Use normalized content if available, otherwise original
+    display_content = normalized_content if normalized_content else content
+    
+    print(f"[GET_MESSAGE_RECEIVER] SUCCESS - Using professional English")
+    return display_content, 'professional_english'

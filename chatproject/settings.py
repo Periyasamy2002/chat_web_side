@@ -30,7 +30,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-2d6^89gl2f04p=5uqpds10=2v4
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['chat-web-side.onrender.com', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['chat-web-side.onrender.com', 'localhost', '127.0.0.1', 'testserver']
 
 
 # Application definition

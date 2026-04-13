@@ -1,16 +1,33 @@
 from django.db import models
 from django.utils import timezone
+from datetime import timedelta
+
+# Constants
+ONLINE_TIMEOUT_MINUTES = 5
+INACTIVITY_DELETE_MINUTES = 4
+NEW_GROUP_DELETE_MINUTES = 5
 
 class AnonymousUser(models.Model):
     """Track anonymous users without authentication"""
+    LANGUAGE_MODE_CHOICES = [
+        ('english', 'English Mode - Display only English, reject Tamil/Tanglish'),
+        ('tamil', 'Tamil Mode - Display only Tamil, accept Tamil/English input'),
+    ]
+    
     session_id = models.CharField(max_length=255, unique=True)
     user_name = models.CharField(max_length=100)
     is_online = models.BooleanField(default=True)
     last_seen = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    language_mode = models.CharField(
+        max_length=10,
+        choices=LANGUAGE_MODE_CHOICES,
+        default='english',
+        help_text='User language display mode: English only or Tamil only'
+    )
 
     def __str__(self):
-        return f"{self.user_name}"
+        return f"{self.user_name} ({self.get_language_mode_display()})"
 
     class Meta:
         ordering = ['-last_seen']
@@ -19,7 +36,6 @@ class Group(models.Model):
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=10, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    # Track last activity for auto-delete feature
     last_activity = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -32,88 +48,38 @@ class Group(models.Model):
             models.Index(fields=['created_at']),
         ]
 
-    def get_online_count(self):
-        """Get count of users online in last 5 minutes"""
-        from django.utils import timezone
-        from datetime import timedelta
-        five_min_ago = timezone.now() - timedelta(minutes=5)
-        return AnonymousUser.objects.filter(
-            is_online=True,
-            last_seen__gte=five_min_ago
-        ).count()
-
     def get_group_online_count(self):
-        """Get count of users online in THIS GROUP in last 5 minutes"""
-        from django.utils import timezone
-        from datetime import timedelta
-        five_min_ago = timezone.now() - timedelta(minutes=5)
-        
-        # Get unique session IDs that have messages in this group
+        """Get count of users online in this group in last 5 minutes"""
+        cutoff_time = timezone.now() - timedelta(minutes=ONLINE_TIMEOUT_MINUTES)
         group_users = self.messages.values_list('session_id', flat=True).distinct()
         
-        # Count how many of those users are currently online
-        online_in_group = AnonymousUser.objects.filter(
+        return AnonymousUser.objects.filter(
             session_id__in=group_users,
             is_online=True,
-            last_seen__gte=five_min_ago
+            last_seen__gte=cutoff_time
         ).count()
-        
-        print(f"[GROUP {self.code}] Group online users: {online_in_group} (from {len(group_users)} total users), Age: {(timezone.now() - self.created_at).total_seconds() / 60:.1f} min, Inactivity: {(timezone.now() - self.last_activity).total_seconds() / 60:.1f} min")
-        
-        return online_in_group
-
-    def should_auto_delete_empty(self):
-        """Check 1: If group is opened with 0 users online"""
-        return self.get_online_count() == 0
-
-    def should_auto_delete_new_empty(self):
-        """Check 2: If new group created and no users joined within 5 minutes"""
-        from datetime import timedelta
-        five_min_ago = timezone.now() - timedelta(minutes=5)
-        # If created 5+ minutes ago AND has 0 online users
-        return self.created_at < five_min_ago and self.get_online_count() == 0
-
-    def should_auto_delete_all_left(self):
-        """Check 4: If all users left and no one rejoins within 4 minutes"""
-        from datetime import timedelta
-        four_min_ago = timezone.now() - timedelta(minutes=4)
-        # If no activity for 4+ minutes AND 0 online users
-        return self.last_activity < four_min_ago and self.get_online_count() == 0
 
     def should_auto_delete(self):
-        """Check all auto-delete conditions - CONSOLIDATED VERSION"""
-        from django.utils import timezone
-        from datetime import timedelta
-        
+        """Check auto-delete conditions and return (should_delete, reason)"""
         try:
-            # Get group-specific online count
             online_count = self.get_group_online_count()
-            age_minutes = (timezone.now() - self.created_at).total_seconds() / 60
-            inactivity_minutes = (timezone.now() - self.last_activity).total_seconds() / 60
+            if online_count > 0:
+                return False, "active"
             
-            # Condition 1: Group opened with 0 users online
-            if online_count == 0:
-                # Condition 2: New group with no joins in 5 minutes (5+ min old, 0 users)
-                if age_minutes >= 5:
-                    reason = f"new_empty_5min (age={age_minutes:.1f}min, inactivity={inactivity_minutes:.1f}min)"
-                    print(f"[DELETE CHECK] Group {self.code}: DELETE (Condition 2) - {reason}")
-                    return True, "new_empty_5min"
-                
-                # Condition 3: All users left for 4+ minutes
-                if inactivity_minutes >= 4:
-                    reason = f"all_left_4min (inactivity={inactivity_minutes:.1f}min)"
-                    print(f"[DELETE CHECK] Group {self.code}: DELETE (Condition 3) - {reason}")
-                    return True, "all_left_4min"
-                
-                print(f"[DELETE CHECK] Group {self.code}: KEEP (0 users but too new/fresh: age={age_minutes:.1f}min, inactivity={inactivity_minutes:.1f}min)")
-                return False, "too_new_or_fresh"
+            now = timezone.now()
+            age_minutes = (now - self.created_at).total_seconds() / 60
+            inactivity_minutes = (now - self.last_activity).total_seconds() / 60
             
-            # Group has online users - keep it
-            print(f"[DELETE CHECK] Group {self.code}: KEEP ({online_count} online users)")
-            return False, "active"
+            if age_minutes >= NEW_GROUP_DELETE_MINUTES:
+                return True, "new_empty_5min"
+            
+            if inactivity_minutes >= INACTIVITY_DELETE_MINUTES:
+                return True, "all_left_4min"
+            
+            return False, "too_new_or_fresh"
         
         except Exception as e:
-            print(f"[DELETE ERROR] Group {self.code}: Error checking auto-delete: {str(e)}")
+            logger.error(f"Group {self.code}: Error checking auto-delete: {str(e)}")
             return False, "error"
 
 class Message(models.Model):
@@ -141,8 +107,13 @@ class Message(models.Model):
     is_deleted = models.CharField(max_length=20, choices=DELETE_STATUS_CHOICES, default='not_deleted')
     
     # Translation support
+    normalized_content = models.TextField(blank=True, null=True, help_text='Professional English version of message (sent to receivers)')
     translated_content = models.TextField(blank=True, null=True, help_text='Cached translation of original content')
     translated_language = models.CharField(max_length=50, blank=True, default='', help_text='Language that translated_content is in')
+    
+    # Bilingual message storage (NEW - explicit Tamil and English versions)
+    tamil_content = models.TextField(blank=True, null=True, help_text='Tamil version of the message (auto-translated)')
+    english_content = models.TextField(blank=True, null=True, help_text='Professional English version of the message')
     
     timestamp = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
