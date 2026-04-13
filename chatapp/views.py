@@ -7,7 +7,7 @@ from datetime import timedelta
 import uuid
 import logging
 from .utils.translator import translate_text, normalize_to_professional_english
-from .utils.tamil_detector import is_valid_english_only, get_language_violation_details, contains_tamil_script, ensure_english_only_display, ensure_tamil_only_display, TAMIL_SCRIPT_START, TAMIL_SCRIPT_END
+from .utils.tamil_detector import is_valid_english_only, get_language_violation_details, contains_tamil_script, ensure_english_only_display, ensure_tamil_only_display, TAMIL_SCRIPT_START, TAMIL_SCRIPT_END, contains_tanglish
 
 logger = logging.getLogger(__name__)
 
@@ -108,26 +108,46 @@ def process_english_mode_message(content):
     Rules:
     - Input: Accept English only
     - If Tamil detected: Auto-convert to English
+    - If Tanglish detected: Auto-convert to English
     - Output: English only (display)
     
     Returns: (english_display, tamil_backend, validation_msg, should_warn)
     """
     has_tamil = contains_tamil_script(content)
+    has_tanglish = contains_tanglish(content)
     
     if has_tamil:
-        # Tamil detected - auto-convert to English
-        logger.info(f"Tamil detected in English mode - auto-converting: {content[:50]}")
+        # Tamil script detected - auto-convert to English
+        logger.info(f"Tamil script detected in English mode - auto-converting: {content[:50]}")
         
         try:
             eng_success, english_converted, _ = translate_text(content, 'English')
             english_version = english_converted if eng_success else content
         except Exception as e:
             logger.warning(f"Failed to convert Tamil to English: {str(e)}")
-            english_version = ensure_english_only_display(content)
+            # If translation fails, keep original (don't filter it away!)
+            english_version = content
         
-        # Warn user about conversion
-        validation_msg = "⚠️ Tamil detected. Converting to English. Only English allowed."
+        validation_msg = "⚠️ Tamil script detected. Converting to English. Only English allowed."
         should_warn = True
+    
+    elif has_tanglish:
+        # Tanglish detected (Tamil written in English letters like "sollren") - convert to English
+        logger.info(f"Tanglish detected in English mode - auto-converting: {content[:50]}")
+        
+        try:
+            # First, try translating as if it's Tamil phonetic spelling
+            # This sends it to Gemini which understands "sollren" = "tell me" in English
+            eng_success, english_converted, _ = translate_text(content, 'English')
+            english_version = english_converted if eng_success else content
+        except Exception as e:
+            logger.warning(f"Failed to convert Tanglish to English: {str(e)}")
+            # If translation fails, keep original (Tanglish is already English letters, should display fine)
+            english_version = content
+        
+        validation_msg = "⚠️ Tanglish detected. Converting to proper English. Use English only."
+        should_warn = True
+    
     else:
         # Pure English - normalize and standardize
         norm_success, normalized_content, _ = normalize_to_professional_english(content, 'English')
@@ -154,15 +174,18 @@ def process_tamil_mode_message(content):
     Rules:
     - Input: Accept Tamil + English
     - If English detected: Auto-convert to Tamil
+    - If Tanglish detected: Auto-convert to Tamil
     - Output: Tamil only (display), English as backend/translation
     
     Returns: (english_backend, tamil_display, validation_msg, should_warn)
     """
     has_tamil = contains_tamil_script(content)
-    has_english = not all(c in ' \t\n\r' or (TAMIL_SCRIPT_START <= ord(c) <= TAMIL_SCRIPT_END) for c in content)
+    has_tanglish = contains_tanglish(content)
+    # Check for English: any ASCII letters (a-z, A-Z) that are NOT in Tanglish patterns
+    has_english = any(('a' <= c <= 'z' or 'A' <= c <= 'Z') for c in content)
     
     if has_tamil and not has_english:
-        # Pure Tamil - keep as is
+        # CASE 1: Pure Tamil (no English, no Tanglish) - KEEP AS IS
         tamil_version = content
         
         try:
@@ -175,37 +198,67 @@ def process_tamil_mode_message(content):
         validation_msg = None
         should_warn = False
     
+    elif has_tanglish and not has_tamil:
+        # CASE 2: Pure Tanglish (no Tamil script, but Tamil words in English) - CONVERT TO TAMIL
+        logger.info(f"Tanglish detected in Tamil mode - auto-converting: {content[:50]}")
+        
+        try:
+            tamil_success, tamil_translated, _ = translate_text(content, 'Tamil')
+            tamil_version = tamil_translated if tamil_success else content
+        except Exception as e:
+            logger.warning(f"Failed to convert Tanglish to Tamil: {str(e)}")
+            tamil_version = content
+        
+        try:
+            eng_success, english_version, _ = translate_text(content, 'English')
+            english_version = english_version if eng_success else content
+        except Exception as e:
+            logger.warning(f"Failed to translate to English: {str(e)}")
+            english_version = content
+        
+        validation_msg = "⚠️ Tanglish detected. Using Tamil. Please type in Tamil script."
+        should_warn = True
+    
     elif has_english:
-        # English detected (pure or mixed) - auto-convert to Tamil
+        # CASE 3: English detected (pure or mixed with Tamil) - auto-convert to Tamil
         logger.info(f"English detected in Tamil mode - auto-converting: {content[:50]}")
         
-        # First normalize the English
-        norm_success, normalized_content, _ = normalize_to_professional_english(content, 'English')
-        english_version = ensure_us_english(normalized_content if norm_success else content)
-        
-        # Then translate to Tamil for display
+        # First, try translating the mixed content as-is
         try:
-            tamil_success, tamil_translated, _ = translate_text(english_version, 'Tamil')
-            tamil_version = tamil_translated if tamil_success else english_version
+            tamil_success, tamil_translated, _ = translate_text(content, 'Tamil')
+            tamil_version = tamil_translated if tamil_success else content
         except Exception as e:
             logger.warning(f"Failed to translate to Tamil: {str(e)}")
-            tamil_version = english_version
+            tamil_version = content
         
-        # Warn user about conversion
+        # Get English version
+        try:
+            eng_success, english_version, _ = translate_text(content, 'English')
+            english_version = english_version if eng_success else content
+        except Exception as e:
+            logger.warning(f"Failed to translate to English: {str(e)}")
+            english_version = content
+        
         validation_msg = "⚠️ English detected. Converting to Tamil. Only Tamil characters allowed in display."
         should_warn = True
     
     else:
-        # Shouldn't reach here - treat as English
-        norm_success, normalized_content, _ = normalize_to_professional_english(content, 'English')
-        english_version = ensure_us_english(normalized_content if norm_success else content)
+        # CASE 4: Nothing detected (shouldn't happen) - treat as English
+        logger.warning(f"No Tamil or English detected in Tamil mode: {content[:50]}")
         
         try:
-            tamil_success, tamil_translated, _ = translate_text(english_version, 'Tamil')
-            tamil_version = tamil_translated if tamil_success else english_version
+            tamil_success, tamil_translated, _ = translate_text(content, 'Tamil')
+            tamil_version = tamil_translated if tamil_success else content
         except Exception as e:
             logger.warning(f"Failed to translate to Tamil: {str(e)}")
-            tamil_version = english_version
+            tamil_version = content
+        
+        try:
+            eng_success, english_version, _ = translate_text(content, 'English')
+            english_version = english_version if eng_success else content
+        except Exception as e:
+            logger.warning(f"Failed to translate to English: {str(e)}")
+            english_version = content
         
         validation_msg = None
         should_warn = False

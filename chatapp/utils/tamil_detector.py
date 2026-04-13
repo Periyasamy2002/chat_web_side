@@ -252,22 +252,42 @@ def convert_tamil_to_english(text):
 def ensure_english_only_display(text):
     """
     Ensure text is suitable for English-only display.
-    Removes or converts any Tamil/non-English characters.
+    Removes any Tamil/non-English characters.
+    
+    Note: Does NOT transliterate! Just removes Tamil script.
+    Transliteration (like "vanakkam") is NOT used.
+    Translation API handles meaning translation.
     
     Args:
         text: Text to filter
         
     Returns:
-        Text with only English characters (Tamil converted to Roman)
+        Text with only English characters (Tamil removed, no transliteration)
     """
     if not text:
         return text
     
-    # If contains Tamil script, convert to English/Roman
-    if contains_tamil_script(text):
-        return convert_tamil_to_english(text)
+    result = []
+    for char in text:
+        char_code = ord(char)
+        
+        # Keep English letters a-z, A-Z
+        if ('a' <= char <= 'z') or ('A' <= char <= 'Z'):
+            result.append(char)
+        # Keep numbers
+        elif char.isdigit():
+            result.append(char)
+        # Keep spaces and common punctuation
+        elif char in ' \t\n.,!?;:\'"()[]{}@-+=*/~`|\\<>':
+            result.append(char)
+        # Skip Tamil script - do NOT transliterate!
+        elif TAMIL_SCRIPT_START <= char_code <= TAMIL_SCRIPT_END:
+            continue  # Remove Tamil script entirely
+        # Keep other safe characters
+        elif ord(char) >= 32 and ord(char) <= 126:
+            result.append(char)
     
-    return text
+    return ''.join(result)
 
 
 def ensure_tamil_only_display(text):

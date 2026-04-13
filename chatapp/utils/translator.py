@@ -115,13 +115,29 @@ def translate_text(text: str, target_language: str) -> Tuple[bool, Optional[str]
     
     print(f"[TRANSLATE] OK Language validation passed")
     
-    # Check if text is already in target language (simple check)
+    # Check if text is already in target language (skip expensive API call if so)
     target_lang_normalized = target_language.strip().lower()
-    # If already in English, just return as is
+    
+    # Import language detection function
+    from .tamil_detector import contains_tamil_script
+    
+    # If English is target, check if input is already English
     if target_lang_normalized == 'english':
-        msg = "No translation needed (English selected)"
-        print(f"[TRANSLATE_SUCCESS] {msg}")
-        return True, text, msg
+        if not contains_tamil_script(text):
+            # Input doesn't contain Tamil script, likely already English
+            msg = "No translation needed (already in English)"
+            print(f"[TRANSLATE_SUCCESS] {msg}")
+            return True, text, msg
+        # Input contains Tamil, needs translation to English
+    
+    # If Tamil is target, check if input is already Tamil
+    elif target_lang_normalized == 'tamil':
+        if contains_tamil_script(text):
+            # Input already contains Tamil script
+            msg = "No translation needed (already in Tamil)"
+            print(f"[TRANSLATE_SUCCESS] {msg}")
+            return True, text, msg
+        # Input is not Tamil, needs translation to Tamil
     
     if not API_KEY:
         msg = "Translation service not configured"
