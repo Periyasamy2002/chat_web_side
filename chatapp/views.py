@@ -52,6 +52,16 @@ def ensure_us_english(text):
     return result
 
 
+def ensure_media_root_exists():
+    """Ensure the MEDIA_ROOT directory exists before writing files."""
+    try:
+        if settings.MEDIA_ROOT and not os.path.isdir(settings.MEDIA_ROOT):
+            os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Failed to create MEDIA_ROOT directory: {e}")
+        raise
+
+
 def check_and_cleanup_group(group):
     """Check if group should be deleted and perform deletion if needed."""
     if not group:
@@ -568,6 +578,7 @@ def text_to_voice_by_mode(tamil_text, english_text, language_mode):
         from django.conf import settings
         import uuid
 
+        ensure_media_root_exists()
         filename = f"{uuid.uuid4()}.mp3"
         audio_path = os.path.join(settings.MEDIA_ROOT, filename)
 
@@ -599,6 +610,7 @@ def generate_bilingual_audio(tamil_text, english_text):
         from django.conf import settings
         import uuid
 
+        ensure_media_root_exists()
         audio_files = {}
 
         # Generate English audio
@@ -673,6 +685,7 @@ def upload_voice_message(request, code):
         # =========================================
         # 💾 Save temp audio
         # =========================================
+        ensure_media_root_exists()
         file_name = f"{uuid.uuid4()}.webm"
         temp_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
