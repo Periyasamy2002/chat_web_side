@@ -63,6 +63,8 @@ TANGLISH_PATTERNS = [
     
     # Specific Tanglish indicators
     r'\b(da|thee|di|ma|pa|cha|thaa|paa)\b',
+    # Explicit literals that users may type to indicate Tanglish
+    r'\b(tanglish|tangenglish)\b',
     r'\b(\w+andha?\b|\w+anda?\b|\w+uma?\b)',
     r'\bzhaa?i?\b',
     r'\bij?i\b',

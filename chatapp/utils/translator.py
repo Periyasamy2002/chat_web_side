@@ -536,3 +536,62 @@ def get_message_for_receiver(content: str, normalized_content: str) -> Tuple[str
     
     print(f"[GET_MESSAGE_RECEIVER] SUCCESS - Using professional English")
     return display_content, 'professional_english'
+
+
+def synthesize_speech_with_gtts(text: str, language_code: str = 'en') -> Tuple[bool, Optional[bytes], str]:
+    """
+    Synthesize speech from text using gTTS (Google Translate TTS - simple fallback).
+    For production, replace with Google Cloud Text-to-Speech API.
+    
+    Args:
+        text: Text to convert to speech
+        language_code: Language code ('en' for English, 'ta' for Tamil)
+        
+    Returns:
+        Tuple of (success, audio_bytes_mp3, message)
+    """
+    print(f"\n[GTTS_SYNTHESIZE] Text: '{text[:50]}...' Language: '{language_code}'")
+    
+    if not text or not isinstance(text, str):
+        msg = "Invalid text for TTS"
+        print(f"[GTTS_FAIL] {msg}")
+        return False, None, msg
+    
+    text = text.strip()
+    if len(text) == 0:
+        msg = "Text cannot be empty"
+        print(f"[GTTS_FAIL] {msg}")
+        return False, None, msg
+    
+    try:
+        # Try importing gTTS; if not installed, return fallback message
+        try:
+            from gtts import gTTS
+        except ImportError:
+            msg = "gTTS not installed. Install with: pip install gtts"
+            print(f"[GTTS_MISSING] {msg}")
+            return False, None, msg
+        
+        # Generate speech
+        tts = gTTS(text=text, lang=language_code, slow=False)
+        
+        # Save to bytes buffer
+        import io
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        audio_bytes = audio_buffer.getvalue()
+        
+        if audio_bytes and len(audio_bytes) > 0:
+            print(f"[GTTS_SUCCESS] Generated {len(audio_bytes)} bytes of audio")
+            return True, audio_bytes, "Speech synthesized successfully"
+        else:
+            msg = "Generated audio is empty"
+            print(f"[GTTS_FAIL] {msg}")
+            return False, None, msg
+            
+    except Exception as e:
+        msg = f"TTS synthesis error: {str(e)}"
+        print(f"[GTTS_EXCEPTION] {msg}")
+        logger.error(msg)
+        return False, None, msg

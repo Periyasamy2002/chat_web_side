@@ -579,11 +579,19 @@
                                     {% if msg.is_deleted == 'deleted_for_all' %}
                                         <em>This message was deleted</em>
                                     {% else %}
-                                        {{ msg.content }}
+                                        {% if language_mode == 'tamil' %}
+                                            {{ msg.tamil_content }}
+                                        {% else %}
+                                            {{ msg.english_content }}
+                                        {% endif %}
                                     {% endif %}
                                 </div>
                                 {% if msg.is_deleted != 'deleted_for_all' %}
-                                    <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
+                                    {% if language_mode == 'tamil' %}
+                                        <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.tamil_content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
+                                    {% else %}
+                                        <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.english_content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
+                                    {% endif %}
                                     <div class="message-translated" id="translated-{{ msg.id }}" style="display: none;"></div>
                                 {% endif %}
                             
@@ -599,7 +607,11 @@
                                         {% if msg.duration %}{{ msg.duration|floatformat:0 }}s{% else %}0s{% endif %}
                                     </div>
                                     <audio style="display: none;">
-                                        <source src="{{ msg.audio_file.url }}" type="{{ msg.audio_mime_type }}">
+                                        {% if language_mode == 'tamil' %}
+                                            <source src="{% if msg.audio_file_tamil %}{{ msg.audio_file_tamil.url }}{% elif msg.audio_file %}{{ msg.audio_file.url }}{% endif %}" type="{{ msg.audio_mime_type }}">
+                                        {% else %}
+                                            <source src="{% if msg.audio_file_english %}{{ msg.audio_file_english.url }}{% elif msg.audio_file %}{{ msg.audio_file.url }}{% endif %}" type="{{ msg.audio_mime_type }}">
+                                        {% endif %}
                                     </audio>
                                 </div>
                             {% endif %}
@@ -624,7 +636,7 @@
                 <small class="input-error" id="inputError"></small>
             </div>
             <button type="button" class="send-btn" id="sendBtn">✈️</button>
-            <button type="button" class="mic-btn" id="micBtn" title="Hold to record">🎤</button>
+            <button type="button" class="mic-btn" id="micBtn" title="Click to start/stop recording">🎤</button>
         </form>
         <div class="recording-indicator" id="recordingIndicator">
             <div class="recording-dot"></div>
@@ -990,6 +1002,239 @@
     const refreshInterval = setInterval(() => {
         fetchMessages();
     }, 1500);
+
+    // Mic / voice recording: press-and-hold to record and upload
+    (function() {
+        const micBtn = document.getElementById('micBtn');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let recordingStart = 0;
+        let recognition = null;
+        let interimTranscript = '';
+        let isRecording = false;
+
+        // Add explicit tangenglish/tanglish literal detection to client-side patterns
+        try {
+            TANGLISH_PATTERNS.push(/\btangenglish\b/gi);
+            TANGLISH_PATTERNS.push(/\btanglish\b/gi);
+        } catch (e) {
+            console.warn('Could not add literal tanglish checks', e);
+        }
+
+        function showRecording(active) {
+            if (active) {
+                micBtn.classList.add('recording');
+                recordingIndicator.classList.add('active');
+            } else {
+                micBtn.classList.remove('recording');
+                recordingIndicator.classList.remove('active');
+            }
+        }
+
+        async function startMediaRecording() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Microphone access is not supported in this browser.');
+                return false;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const options = {};
+                // prefer webm/opus if supported
+                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                    options.mimeType = 'audio/webm;codecs=opus';
+                } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                    options.mimeType = 'audio/ogg;codecs=opus';
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
+                recordedChunks = [];
+
+                mediaRecorder.ondataavailable = function(e) {
+                    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+                };
+
+                mediaRecorder.start();
+                recordingStart = Date.now();
+
+                // Try starting SpeechRecognition in parallel (best-effort, browser dependent)
+                try {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    if (SpeechRecognition) {
+                        recognition = new SpeechRecognition();
+                        recognition.lang = (userLanguageMode === 'tamil') ? 'ta-IN' : 'en-US';
+                        recognition.interimResults = false;
+                        recognition.maxAlternatives = 1;
+
+                        recognition.onresult = (ev) => {
+                            if (ev.results && ev.results[0] && ev.results[0][0]) {
+                                interimTranscript = ev.results[0][0].transcript || '';
+                            }
+                        };
+                        recognition.onerror = () => { /* ignore recognition errors */ };
+                        recognition.start();
+                    }
+                } catch (err) {
+                    recognition = null;
+                }
+
+                showRecording(true);
+                return true;
+            } catch (err) {
+                console.error('getUserMedia error', err);
+                alert('Microphone permission denied or unavailable.');
+                return false;
+            }
+        }
+
+        function stopMediaRecordingAndUpload() {
+            if (!mediaRecorder) return;
+            isRecording = false;
+
+            const stoppedAt = Date.now();
+            const durationSec = Math.max(0.5, (stoppedAt - recordingStart) / 1000);
+
+            // Stop SpeechRecognition if active
+            try {
+                if (recognition) {
+                    recognition.stop();
+                }
+            } catch (e) { }
+
+            mediaRecorder.onstop = function() {
+                const blob = new Blob(recordedChunks, { type: recordedChunks[0] ? recordedChunks[0].type : 'audio/webm' });
+                uploadVoiceBlob(blob, durationSec, interimTranscript);
+                // Stop tracks to free microphone
+                try {
+                    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+                } catch (e) {}
+                mediaRecorder = null;
+                recordedChunks = [];
+                interimTranscript = '';
+                showRecording(false);
+            };
+
+            try { mediaRecorder.stop(); } catch (e) { console.warn(e); }
+        }
+
+        function playFallbackSpeech(text, targetLang) {
+            try {
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = (targetLang.toLowerCase() === 'tamil') ? 'ta-IN' : 'en-US';
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(utter);
+            } catch (e) {
+                console.warn('Speech synthesis failed', e);
+            }
+        }
+
+        function uploadVoiceBlob(blob, duration, transcriptText) {
+            const inputError = document.getElementById('inputError');
+            const fd = new FormData();
+            fd.append('audio', blob, 'voice_message.webm');
+            fd.append('duration', String(Math.round(duration)));
+            fd.append('audio_mime_type', blob.type || 'audio/webm');
+            if (transcriptText && transcriptText.trim()) fd.append('text', transcriptText.trim());
+
+            fetch(`/group/${groupCode}/upload-voice/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                },
+                body: fd
+            })
+            .then(response => parseJSONSafely(response).then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) {
+                    inputError.textContent = data.error || 'Failed to upload voice message';
+                    inputError.style.display = 'block';
+                    return;
+                }
+                // Success: clear any input error and refresh messages
+                inputError.style.display = 'none';
+                scrollToBottom();
+
+                if (data.source_text) {
+                    console.log('Voice upload source text:', data.source_text);
+                    console.log('Translated English text:', data.english_text);
+                    console.log('Translated Tamil text:', data.tamil_text);
+                }
+
+                setTimeout(() => fetchMessages(), 200);
+
+                if (transcriptText && transcriptText.trim()) {
+                    const sourceText = transcriptText.trim();
+                    const targetLang = (userLanguageMode === 'tamil') ? 'English' : 'Tamil';
+
+                    fetch(`/group/${groupCode}/translate/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                        },
+                        body: `text=${encodeURIComponent(sourceText)}&language=${encodeURIComponent(targetLang)}`
+                    })
+                    .then(response => parseJSONSafely(response).then(d => ({ ok: response.ok, data: d })))
+                    .then(({ ok, data }) => {
+                        if (!ok || !data.success || !data.translated) {
+                            playFallbackSpeech(sourceText, targetLang);
+                            return;
+                        }
+
+                        const translatedText = data.translated;
+                        fetch(`/group/${groupCode}/synthesize-voice/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                            },
+                            body: `text=${encodeURIComponent(translatedText)}&language=${encodeURIComponent(targetLang)}`
+                        })
+                        .then(response => parseJSONSafely(response).then(d => ({ ok: response.ok, data: d })))
+                        .then(({ ok, data }) => {
+                            if (!ok || !data.success || !data.audio_url) {
+                                console.warn('Server voice synthesis failed', data && data.error);
+                                playFallbackSpeech(translatedText, targetLang);
+                                return;
+                            }
+                            const audioPlayer = new Audio(data.audio_url);
+                            audioPlayer.play().catch(err => {
+                                console.warn('Audio playback failed', err);
+                                playFallbackSpeech(translatedText, targetLang);
+                            });
+                        })
+                        .catch(err => {
+                            console.warn('Synthesize voice request failed', err);
+                            playFallbackSpeech(translatedText, targetLang);
+                        });
+                    })
+                    .catch(err => {
+                        console.warn('Translate after upload failed', err);
+                        playFallbackSpeech(sourceText, targetLang);
+                    });
+                }
+            })
+            .catch(err => {
+                console.error('Voice upload error', err);
+                inputError.textContent = 'Failed to upload voice message';
+                inputError.style.display = 'block';
+            });
+        }
+
+        // Attach click-to-toggle recording handler
+        micBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (isRecording) {
+                stopMediaRecordingAndUpload();
+            } else {
+                const started = await startMediaRecording();
+                if (started) {
+                    isRecording = true;
+                }
+            }
+        });
+    })();
 </script>
 
 {% endblock %}

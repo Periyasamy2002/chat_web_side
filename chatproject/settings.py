@@ -134,6 +134,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_URL = '/media/'
+
 # Production security settings
 CSRF_TRUSTED_ORIGINS = [
     'https://chat-web-side.onrender.com',

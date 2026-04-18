@@ -4,8 +4,8 @@ from datetime import timedelta
 
 # Constants
 ONLINE_TIMEOUT_MINUTES = 5
-INACTIVITY_DELETE_MINUTES = 4
-NEW_GROUP_DELETE_MINUTES = 5
+INACTIVITY_DELETE_MINUTES = 360  # 12 hours 720
+NEW_GROUP_DELETE_MINUTES = 720  # 1 day 1440
 
 class AnonymousUser(models.Model):
     """Track anonymous users without authentication"""
@@ -51,13 +51,8 @@ class Group(models.Model):
     def get_group_online_count(self):
         """Get count of users online in this group in last 5 minutes"""
         cutoff_time = timezone.now() - timedelta(minutes=ONLINE_TIMEOUT_MINUTES)
-        group_users = self.messages.values_list('session_id', flat=True).distinct()
-        
-        return AnonymousUser.objects.filter(
-            session_id__in=group_users,
-            is_online=True,
-            last_seen__gte=cutoff_time
-        ).count()
+        return self.members.filter(last_seen__gte=cutoff_time).count()
+
 
     def should_auto_delete(self):
         """Check auto-delete conditions and return (should_delete, reason)"""
@@ -71,10 +66,10 @@ class Group(models.Model):
             inactivity_minutes = (now - self.last_activity).total_seconds() / 60
             
             if age_minutes >= NEW_GROUP_DELETE_MINUTES:
-                return True, "new_empty_5min"
+                return True, "new_empty_1day"
             
             if inactivity_minutes >= INACTIVITY_DELETE_MINUTES:
-                return True, "all_left_4min"
+                return True, "all_left_12hours"
             
             return False, "too_new_or_fresh"
         
@@ -100,6 +95,11 @@ class Message(models.Model):
     content = models.TextField(blank=True, null=True)
     audio_file = models.FileField(upload_to='voice_messages/', blank=True, null=True)
     audio_mime_type = models.CharField(max_length=50, default='audio/webm', help_text='MIME type of audio file')
+    
+    # Bilingual audio support for voice messages
+    audio_file_english = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='English version of voice message')
+    audio_file_tamil = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Tamil version of voice message')
+    
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     duration = models.FloatField(default=0)
     
@@ -139,3 +139,37 @@ class Message(models.Model):
         if self.is_deleted == 'deleted_for_all':
             return "This message was deleted"
         return self.content
+
+
+class GroupMember(models.Model):
+    """Track group membership"""
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='members')
+    session_id = models.CharField(max_length=255)
+    joined_at = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('group', 'session_id')
+        ordering = ['-joined_at']
+        indexes = [
+            models.Index(fields=['group', 'last_seen']),
+        ]
+
+    def __str__(self):
+        return f"{self.session_id} in {self.group.code}"
+
+
+class DeletedMessage(models.Model):
+    """Track user-specific message deletions"""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='deletions')
+    session_id = models.CharField(max_length=255)
+    deleted_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('message', 'session_id')
+        indexes = [
+            models.Index(fields=['message', 'session_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.session_id} deleted {self.message.id}"

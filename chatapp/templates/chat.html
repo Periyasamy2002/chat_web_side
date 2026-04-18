@@ -247,13 +247,12 @@
     </div>
     {% endif %}
 
-    <form method="POST" onsubmit="return validateChatForm(event)">
-        {% csrf_token %}
+<form method="POST">
+            {% csrf_token %}
 
-        <div class="form-group">
-            <label for="user_name">Your Name</label>
-            <input type="text" id="user_name" name="user_name" placeholder="e.g., John, Alice" required>
-            <small id="nameError" style="color: #ffcdd2; display: none; margin-top: 0.3rem;">❌ Username must be English only (no Tamil or Tanglish)</small>
+            <div class="form-group">
+                <label for="user_name">Your Name</label>
+                <input type="text" id="user_name" name="user_name" placeholder="e.g., John, Alice" required>
         </div>
 
         <div class="form-group">
@@ -287,18 +286,8 @@
 </div>
 
 <script>
-    function validateChatForm(event) {
-        const nameInput = document.getElementById('user_name');
-        const nameError = document.getElementById('nameError');
-        
-        if (!/^[a-zA-Z0-9\s\-']+$/.test(nameInput.value.trim())) {
-            nameError.style.display = 'block';
-            event.preventDefault();
-            return false;
-        }
-        nameError.style.display = 'none';
-        return true;
-    }
+
+
 </script>
 
 {% endblock %}
