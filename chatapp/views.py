@@ -691,49 +691,69 @@ def upload_voice_message(request, code):
             session_id = request.session.session_key
 
         language_mode = get_language_mode(request, session_id)
+        transcript_text = request.POST.get('text', '').strip()
 
         # =========================================
-        # 🧠 SPEECH → TEXT (BASED ON MODE)
+        # 🧠 SPEECH → TEXT (CLIENT FIRST, SERVER SECOND)
         # =========================================
-        if language_mode == "tamil":
-            print(f"🎤 Tamil mode: Processing audio with ta-IN")
-            tamil_text = speech_to_text(temp_path, lang="ta-IN")
-            print(f"📝 Tamil STT result: '{tamil_text}' (length: {len(tamil_text) if tamil_text else 0})")
-
-            if not tamil_text:
-                print("❌ Tamil STT failed - no text recognized")
-                return JsonResponse({'error': 'Speech not recognized'}, status=400)
-
-            print("🔄 Translating Tamil to English...")
-            english_text = translate_with_gemini(tamil_text)
-            print(f"📝 English translation: '{english_text}'")
-
-        else:
-            print(f"🎤 English mode: Processing audio with en (general English)")
-            english_text = speech_to_text(temp_path, lang="en")
-            print(f"📝 English STT result: '{english_text}' (length: {len(english_text) if english_text else 0})")
-
-            if not english_text:
-                print("❌ English STT failed - trying with en-US...")
-                # Try with US English as fallback
-                english_text = speech_to_text(temp_path, lang="en-US")
-                print(f"📝 English STT en-US result: '{english_text}' (length: {len(english_text) if english_text else 0})")
-                
-                if not english_text:
-                    print("❌ English STT completely failed")
-                    return JsonResponse({'error': 'Speech not recognized. Please speak clearly in English.'}, status=400)
-
-            print("🔄 Translating English to Tamil...")
-            # Optional Tamil backend
-            try:
-                success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
-                print(f"📝 Tamil translation success: {success}, result: '{tamil_text}', msg: {translation_msg}")
-                if not success:
-                    print("⚠️ Translation failed, using English text as fallback")
+        if transcript_text:
+            print(f"📝 Using browser transcript text: '{transcript_text[:60]}'")
+            if language_mode == "tamil":
+                tamil_text = transcript_text
+                try:
+                    english_text = translate_with_gemini(tamil_text)
+                except Exception as e:
+                    print(f"⚠️ Gemini translation failed: {e}")
+                    english_text = tamil_text
+            else:
+                english_text = transcript_text
+                try:
+                    success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
+                    if not success:
+                        print("⚠️ Tamil translation failed, using English text as fallback")
+                        tamil_text = english_text
+                except Exception as e:
+                    print(f"⚠️ Translation exception: {e}, using English text as fallback")
                     tamil_text = english_text
-            except Exception as e:
-                print(f"⚠️ Translation exception: {e}, using English text as fallback")
-                tamil_text = english_text
+        else:
+            if language_mode == "tamil":
+                print(f"🎤 Tamil mode: Processing audio with ta-IN")
+                tamil_text = speech_to_text(temp_path, lang="ta-IN")
+                print(f"📝 Tamil STT result: '{tamil_text}' (length: {len(tamil_text) if tamil_text else 0})")
+
+                if not tamil_text:
+                    print("❌ Tamil STT failed - no text recognized")
+                    return JsonResponse({'error': 'Speech not recognized. Please speak clearly in Tamil.'}, status=400)
+
+                print("🔄 Translating Tamil to English...")
+                try:
+                    english_text = translate_with_gemini(tamil_text)
+                except Exception as e:
+                    print(f"⚠️ Gemini translation failed: {e}")
+                    english_text = tamil_text
+            else:
+                print(f"🎤 English mode: Processing audio with en (general English)")
+                english_text = speech_to_text(temp_path, lang="en")
+                print(f"📝 English STT result: '{english_text}' (length: {len(english_text) if english_text else 0})")
+
+                if not english_text:
+                    print("❌ English STT failed - trying with en-US...")
+                    english_text = speech_to_text(temp_path, lang="en-US")
+                    print(f"📝 English STT en-US result: '{english_text}' (length: {len(english_text) if english_text else 0})")
+
+                    if not english_text:
+                        print("❌ English STT completely failed")
+                        return JsonResponse({'error': 'Speech not recognized. Please speak clearly in English.'}, status=400)
+
+                print("🔄 Translating English to Tamil...")
+                try:
+                    success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
+                    if not success:
+                        print("⚠️ Translation failed, using English text as fallback")
+                        tamil_text = english_text
+                except Exception as e:
+                    print(f"⚠️ Translation exception: {e}, using English text as fallback")
+                    tamil_text = english_text
 
         print("📝 Tamil:", tamil_text)
         print("📝 English:", english_text)
