@@ -355,15 +355,15 @@ def chat(request):
 
 def group_manage(request):
     """New view to handle group creation and listing."""
-    error = None  # Ensure this line is correctly indented to the function level
+    error = None
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
         name = request.POST.get("name", "").strip() or code
         
         if not code:
-            error = "Group code is required"  # This line should be consistently indented
+            error = "Group code is required"
         elif Group.objects.filter(code=code).exists():
-            error = "Group code already exists"  # This line should be consistently indented
+            error = "Group code already exists"
         else:
             Group.objects.create(code=code, name=name)
             return redirect("group_manage")
@@ -378,7 +378,7 @@ def group_manage(request):
             'name': g.name,
             'created_at': g.created_at,
             'message_count': g.messages.count(),
-            'online_count': g.get_group_online_count(),  # Ensure this line is correctly indented
+            'online_count': g.get_group_online_count(),
             'last_activity': g.last_activity
         })
         
@@ -500,12 +500,6 @@ import google.generativeai as genai
 # ================================
 # 🔹 LOAD ENV + GEMINI
 # ================================
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
-
-
 # ================================
 # 🔹 SPEECH TO TEXT
 # ================================
