@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .manage-container { max-width: 900px; margin: 2rem auto; padding: 1rem; color: white; }
+    .card { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 15px; padding: 1.5rem; border: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 2rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; }
+    .form-group input { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; background: rgba(255, 255, 255, 0.2); color: white; }
+    .btn { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
+    .btn-primary { background: #4CAF50; color: white; }
+    .btn-danger { background: #f44336; color: white; font-size: 0.8rem; padding: 0.4rem 0.8rem; }
+    
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: rgba(0,0,0,0.2); border-radius: 10px; overflow: hidden; }
+    th, td { padding: 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    th { background: rgba(102, 126, 234, 0.4); }
+    tr:hover { background: rgba(255,255,255,0.05); }
+    .status-online { color: #4CAF50; font-weight: bold; }
+</style>
+
+<div class="manage-container">
+    <div class="card">
+        <h2>🆕 Create New Group</h2>
+        <p>Initialize a new chat room. Users can only join after you create it here.</p>
+        
+        {% if error %}
+        <div style="color: #ffcdd2; background: rgba(244, 67, 54, 0.2); padding: 0.5rem; border-radius: 5px; margin-bottom: 1rem;">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST">
+            {% csrf_token %}
+            <div class="form-group">
+                <label>Group Code (Required)</label>
+                <input type="text" name="code" placeholder="e.g. WORK2024" required>
+            </div>
+            <div class="form-group">
+                <label>Group Display Name (Optional)</label>
+                <input type="text" name="name" placeholder="e.g. Office Team">
+            </div>
+            <button type="submit" class="btn btn-primary">➕ Create Group</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📋 Active Groups</h2>
+        <p>Monitor current workflow, message counts, and active users.</p>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Group Name</th>
+                    <th>Code</th>
+                    <th>Messages</th>
+                    <th>Online</th>
+                    <th>Last Active</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in groups %}
+                <tr>
+                    <td>{{ g.name }}</td>
+                    <td><code>{{ g.code }}</code></td>
+                    <td>{{ g.message_count }}</td>
+                    <td><span class="status-online">{{ g.online_count }}</span></td>
+                    <td>{{ g.last_activity|date:"d M, H:i" }}</td>
+                    <td>
+                        <a href="{% url 'delete_group_entirely' g.code %}" 
+                           class="btn btn-danger" 
+                           onclick="return confirm('Delete this group and all messages?')">🗑️ Delete</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align: center;">No groups created yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div style="text-align: center;">
+        <a href="{% url 'chat' %}" style="color: white; text-decoration: none;">← Back to Join Page</a>
+    </div>
+</div>
+{% endblock %}

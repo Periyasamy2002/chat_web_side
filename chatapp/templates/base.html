@@ -362,10 +362,10 @@
 
 <nav>
     <div style="display: flex; gap: 1rem;">
-        <a href="/">Home</a>
-        <a href="/chat/">Chat</a>
+        <a href="{% url 'home' %}">Home</a>
+        <a href="{% url 'chat' %}">Chat</a>
+        <a href="{% url 'group_manage' %}">Groups create</a>
     </div>
-</nav>
 </nav>
 
 <hr>

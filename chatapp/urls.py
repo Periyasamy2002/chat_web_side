@@ -18,4 +18,8 @@ urlpatterns = [
     # Auto-deletion & cleanup monitoring
     path("group/<str:code>/cleanup-status/", views.get_group_cleanup_status, name="cleanup_status"),
     path("admin/groups-status/", views.get_all_groups_status, name="all_groups_status"),
+
+    # Group Management and Creation
+    path("group-manage/", views.group_manage, name="group_manage"),
+    path("group-delete/<str:code>/", views.delete_group_entirely, name="delete_group_entirely"),
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

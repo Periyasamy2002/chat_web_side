@@ -1,5 +1,4 @@
 from django.shortcuts import render, redirect
-from urllib3 import request
 
 from chatproject import settings
 from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES
@@ -313,7 +312,11 @@ def chat(request):
         request.session['language_mode'] = language_mode
         request.session.save()
         
-        group, _ = Group.objects.get_or_create(code=code, defaults={"name": code})
+        # Modified to only allow joining existing groups
+        group = Group.objects.filter(code=code).first()
+        if not group:
+            return render(request, "chat.html", {"error": "Group code not found. Please create the group first."})
+            
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
         
@@ -350,6 +353,47 @@ def chat(request):
 
     return render(request, "chat.html")
 
+def group_manage(request):
+    """New view to handle group creation and listing."""
+    error = None  # Ensure this line is correctly indented to the function level
+    if request.method == "POST":
+        code = request.POST.get("code", "").strip()
+        name = request.POST.get("name", "").strip() or code
+        
+        if not code:
+            error = "Group code is required"  # This line should be consistently indented
+        elif Group.objects.filter(code=code).exists():
+            error = "Group code already exists"  # This line should be consistently indented
+        else:
+            Group.objects.create(code=code, name=name)
+            return redirect("group_manage")
+
+    # Prepare group data with stats for the listing table
+    groups = Group.objects.all().order_by('-last_activity')
+    groups_data = []
+
+    for g in groups:
+        groups_data.append({
+            'code': g.code,
+            'name': g.name,
+            'created_at': g.created_at,
+            'message_count': g.messages.count(),
+            'online_count': g.get_group_online_count(),  # Ensure this line is correctly indented
+            'last_activity': g.last_activity
+        })
+        
+    return render(request, "group_create.html", {
+        "groups": groups_data, 
+        "error": error
+    })
+
+def delete_group_entirely(request, code):
+    """Delete a group and all its data."""
+    try:
+        Group.objects.filter(code=code).delete()
+    except Exception:
+        pass
+    return redirect("group_manage")
 
 def group(request, code):
     """Group chat view with language mode filtering."""
@@ -657,7 +701,7 @@ def generate_bilingual_audio(tamil_text, english_text):
 # ================================
 # 🔹 MAIN API
 # ================================
-@require_http_methods(["POST"])
+
 @require_http_methods(["POST"])
 def upload_voice_message(request, code):
 
@@ -665,6 +709,7 @@ def upload_voice_message(request, code):
         return JsonResponse({'error': 'Audio not received'}, status=400)
 
     audio_file = request.FILES['audio']
+    transcript_text = request.POST.get('text', '').strip()
 
     if audio_file.size == 0:
         return JsonResponse({'error': 'Empty audio'}, status=400)
@@ -695,18 +740,26 @@ def upload_voice_message(request, code):
         # =========================================
         # 🧠 SPEECH → TEXT (BASED ON MODE)
         # =========================================
+        stt_failed = False
+
         if language_mode == "tamil":
             print(f"🎤 Tamil mode: Processing audio with ta-IN")
             tamil_text = speech_to_text(temp_path, lang="ta-IN")
             print(f"📝 Tamil STT result: '{tamil_text}' (length: {len(tamil_text) if tamil_text else 0})")
 
-            if not tamil_text:
-                print("❌ Tamil STT failed - no text recognized")
-                return JsonResponse({'error': 'Speech not recognized'}, status=400)
+            if not tamil_text and transcript_text:
+                print("⚠️ Tamil STT empty, using client-provided transcript fallback")
+                tamil_text = transcript_text
 
-            print("🔄 Translating Tamil to English...")
-            english_text = translate_with_gemini(tamil_text)
-            print(f"📝 English translation: '{english_text}'")
+            if not tamil_text:
+                print("❌ Tamil STT failed - saving voice-only message")
+                tamil_text = ""
+                english_text = ""
+                stt_failed = True
+            else:
+                print("🔄 Translating Tamil to English...")
+                english_text = translate_with_gemini(tamil_text)
+                print(f"📝 English translation: '{english_text}'")
 
         else:
             print(f"🎤 English mode: Processing audio with en (general English)")
@@ -715,25 +768,30 @@ def upload_voice_message(request, code):
 
             if not english_text:
                 print("❌ English STT failed - trying with en-US...")
-                # Try with US English as fallback
                 english_text = speech_to_text(temp_path, lang="en-US")
                 print(f"📝 English STT en-US result: '{english_text}' (length: {len(english_text) if english_text else 0})")
-                
-                if not english_text:
-                    print("❌ English STT completely failed")
-                    return JsonResponse({'error': 'Speech not recognized. Please speak clearly in English.'}, status=400)
 
-            print("🔄 Translating English to Tamil...")
-            # Optional Tamil backend
-            try:
-                success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
-                print(f"📝 Tamil translation success: {success}, result: '{tamil_text}', msg: {translation_msg}")
-                if not success:
-                    print("⚠️ Translation failed, using English text as fallback")
+                if not english_text and transcript_text:
+                    print("⚠️ English STT empty, using client-provided transcript fallback")
+                    english_text = transcript_text
+
+                if not english_text:
+                    print("❌ English STT completely failed - saving voice-only message")
+                    english_text = ""
+                    tamil_text = ""
+                    stt_failed = True
+
+            if english_text:
+                print("🔄 Translating English to Tamil...")
+                try:
+                    success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
+                    print(f"📝 Tamil translation success: {success}, result: '{tamil_text}', msg: {translation_msg}")
+                    if not success:
+                        print("⚠️ Translation failed, using English text as fallback")
+                        tamil_text = english_text
+                except Exception as e:
+                    print(f"⚠️ Translation exception: {e}, using English text as fallback")
                     tamil_text = english_text
-            except Exception as e:
-                print(f"⚠️ Translation exception: {e}, using English text as fallback")
-                tamil_text = english_text
 
         print("📝 Tamil:", tamil_text)
         print("📝 English:", english_text)
@@ -757,6 +815,7 @@ def upload_voice_message(request, code):
             word_count = len(content.split())
             estimated_duration = max(1, word_count / 2.5)
 
+            message_audio_mime_type = audio_file.content_type or 'audio/webm'
             message = Message.objects.create(
                 group=group,
                 content=content,
@@ -767,7 +826,7 @@ def upload_voice_message(request, code):
                 duration=estimated_duration,
                 user_name=user_name,
                 session_id=session_id,
-                audio_mime_type='audio/mpeg'
+                audio_mime_type=message_audio_mime_type
             )
 
             # ✅ SAVE BILINGUAL AUDIO FILES
@@ -794,21 +853,35 @@ def upload_voice_message(request, code):
                 except Exception as e:
                     print(f"❌ Failed to save Tamil audio: {str(e)}")
             
-            # Set default audio_file to English version
+            # Set default audio_file to English version if available
+            primary_audio_saved_as_mp3 = False
             if audio_files.get('english') and audio_files['english']['path']:
                 try:
                     print(f"💾 Setting default audio file to English: {audio_files['english']['path']}")
                     with open(audio_files['english']['path'], 'rb') as f:
                         message.audio_file.save(audio_files['english']['filename'], File(f))
                     print("✅ Default audio file set")
+                    primary_audio_saved_as_mp3 = True
                 except Exception as e:
                     print(f"❌ Failed to save default audio file: {str(e)}")
+            elif os.path.exists(temp_path):
+                try:
+                    print(f"💾 Saving original uploaded voice file as fallback: {temp_path}")
+                    with open(temp_path, 'rb') as f:
+                        message.audio_file.save(os.path.basename(temp_path), File(f))
+                    print("✅ Saved original voice file to database")
+                except Exception as e:
+                    print(f"❌ Failed to save original voice file: {str(e)}")
             else:
-                print("⚠️ No English audio available, default audio_file not set")
+                print("⚠️ No audio file available to save for this message")
 
             message.translated_content = english_text
             message.translated_language = 'English'
-            message.save(update_fields=['audio_file_english', 'audio_file_tamil', 'audio_file', 'translated_content', 'translated_language'])
+            if primary_audio_saved_as_mp3:
+                message.audio_mime_type = 'audio/mpeg'
+            else:
+                message.audio_mime_type = audio_file.content_type or 'audio/webm'
+            message.save(update_fields=['audio_file_english', 'audio_file_tamil', 'audio_file', 'translated_content', 'translated_language', 'audio_mime_type'])
 
             # Update user
             anon_user, _ = AnonymousUser.objects.get_or_create(
@@ -853,9 +926,12 @@ def upload_voice_message(request, code):
             'success': True,
             'tamil_text': tamil_text,
             'english_text': english_text,
-            'audio': audio_files['english']['url'] if audio_files.get('english') else None,
+            'audio': message.audio_file.url if message.audio_file else (audio_files['english']['url'] if audio_files.get('english') else None),
             'mode': language_mode
         }
+
+        if stt_failed:
+            response['note'] = 'speech_recognition_unavailable'
 
         if message_id:
             response['message_id'] = message_id
