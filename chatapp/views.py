@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import timedelta
 import uuid
 import logging
+from django.contrib import messages
 import io
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
@@ -297,9 +298,8 @@ def register_view(request):
             user.email = email
             user.save(update_fields=['email'])
             UserProfile.objects.create(user=user, is_approved=False, mobile_number=mobile)
-            return render(request, "login.html", {
-                "info": "Registration successful! Please wait for Admin approval before logging in."
-            })
+            messages.info(request, "Registration successful! Please wait for Admin approval before logging in.")
+            return redirect("login")
     else:
         form = UserCreationForm()
     return render(request, "register.html", {"form": form})

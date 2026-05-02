@@ -172,5 +172,5 @@ if not DEBUG:
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Login/Logout URLs
-LOGIN_URL = 'register'
-LOGOUT_REDIRECT_URL = 'register'
+LOGIN_URL = 'login'
+LOGOUT_REDIRECT_URL = 'login'
