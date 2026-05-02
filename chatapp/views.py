@@ -292,64 +292,129 @@ def register_view(request):
     if request.method == "POST":
         form = UserCreationForm(request.POST)
         if form.is_valid():
-            email = request.POST.get('email')
-            mobile = request.POST.get('mobile')
-            user = form.save()
-            user.email = email
-            user.save(update_fields=['email'])
-            UserProfile.objects.create(user=user, is_approved=False, mobile_number=mobile)
-            messages.info(request, "Registration successful! Please wait for Admin approval before logging in.")
-            return redirect("login")
+            try:
+                email = request.POST.get('email', '').strip()
+                mobile = request.POST.get('mobile', '').strip()
+                user = form.save()
+                
+                if email:
+                    user.email = email
+                    user.save(update_fields=['email'])
+                
+                # IMPORTANT: Ensure UserProfile is created
+                profile, created = UserProfile.objects.get_or_create(
+                    user=user,
+                    defaults={'is_approved': False, 'mobile_number': mobile}
+                )
+                
+                if not created and not profile.mobile_number and mobile:
+                    profile.mobile_number = mobile
+                    profile.save()
+                
+                logger.info(f"[REGISTER] ✅ User '{user.username}' registered. Profile created: {created}, approved: {profile.is_approved}")
+                messages.success(request, "✅ Registration successful! Awaiting Admin approval.")
+                return redirect("login")
+            except Exception as e:
+                logger.error(f"[REGISTER] Error: {str(e)}")
+                messages.error(request, f"Registration error: {str(e)}")
+        else:
+            logger.warning(f"[REGISTER] Form errors: {form.errors}")
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"{field}: {error}")
     else:
         form = UserCreationForm()
+    
     return render(request, "register.html", {"form": form})
 
 
 def login_view(request):
+    """
+    Enhanced login view with comprehensive debugging and error handling.
+    
+    Flow:
+    1. POST: Validate username/password
+    2. Check if user exists and has UserProfile
+    3. Check if user is approved or admin
+    4. Create session and redirect
+    5. Log detailed info for debugging
+    """
     if request.method == "POST":
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '').strip()
+        
+        logger.info(f"[LOGIN] Attempt for username: {username}")
+        
+        # Step 1: Validate form
         form = AuthenticationForm(request, data=request.POST)
-        logger.info(f"Login attempt for user: {request.POST.get('username')}")
-
-        if form.is_valid():
-            user = form.get_user()
-            logger.info(f"Form valid for user: {user.username}. Checking approval...")
-
-            try:
-                profile = user.profile
-            except UserProfile.DoesNotExist:
-                if user.is_superuser:
-                    profile = UserProfile.objects.create(user=user, is_approved=True)
-                else:
-                    profile = None
-
-            if profile:
-                if profile.is_approved or user.is_superuser:
-                    logger.info(f"User {user.username} is approved/admin. Logging in...")
-                    login(request, user)
-                    return redirect("dashboard") if user.is_superuser else redirect("home")
-                else:
-                    logger.warning(f"User {user.username} login blocked: Not approved.")
-                    return render(request, "login.html", {
-                        "form": form,
-                        "error": "Your account is pending approval by the Admin."
-                    })
-            else:
-                logger.error(f"UserProfile missing for user: {user.username}")
-                return render(request, "login.html", {
-                    "form": form,
-                    "error": "Profile missing. Please contact the Admin."
-                })
-        else:
-            logger.warning(f"Login form invalid for: {request.POST.get('username')}. Errors: {form.errors.as_json()}")
+        
+        if not form.is_valid():
+            logger.warning(f"[LOGIN] Authentication FAILED for '{username}': {form.errors.as_json()}")
             return render(request, "login.html", {
                 "form": form,
-                "error": "Invalid username or password."
+                "error": "❌ Invalid username or password. Please check your credentials.",
+                "username": username
             })
-
+        
+        # Step 2: Get authenticated user
+        user = form.get_user()
+        logger.info(f"[LOGIN] User authenticated: {user.username} (ID: {user.id}, is_superuser: {user.is_superuser})")
+        
+        # Step 3: Check UserProfile
+        try:
+            profile = user.profile
+            logger.info(f"[LOGIN] UserProfile found: is_approved={profile.is_approved}")
+        except UserProfile.DoesNotExist:
+            logger.warning(f"[LOGIN] UserProfile MISSING for user {user.username}")
+            
+            # Auto-create profile for superuser
+            if user.is_superuser:
+                profile = UserProfile.objects.create(user=user, is_approved=True)
+                logger.info(f"[LOGIN] Auto-created approved profile for superuser {user.username}")
+            else:
+                logger.error(f"[LOGIN] Cannot login: No profile for regular user {user.username}")
+                return render(request, "login.html", {
+                    "form": form,
+                    "error": "⚠️ Your profile is missing. Please contact the Administrator.",
+                    "username": username
+                })
+        
+        # Step 4: Check approval status
+        if profile.is_approved or user.is_superuser:
+            logger.info(f"[LOGIN] User {user.username} APPROVED. Creating session...")
+            
+            # Ensure session exists
+            if not request.session.session_key:
+                request.session.create()
+            
+            # Create session and log in
+            login(request, user)
+            
+            # Verify session was created
+            logger.info(f"[LOGIN] Session created: {request.session.session_key}")
+            logger.info(f"[LOGIN] ✅ SUCCESS: User {user.username} logged in. Redirecting...")
+            
+            # Redirect to appropriate dashboard
+            redirect_url = "dashboard" if user.is_superuser else "home"
+            logger.info(f"[LOGIN] Redirecting to: {redirect_url}")
+            return redirect(redirect_url)
+        else:
+            logger.warning(f"[LOGIN] User {user.username} NOT APPROVED. is_approved={profile.is_approved}")
+            return render(request, "login.html", {
+                "form": form,
+                "error": "⏳ Your account is pending Admin approval. Please wait.",
+                "info": f"Your account '{username}' has been registered but needs approval.",
+                "username": username
+            })
+    
+    # GET request: Display login form
     else:
         form = AuthenticationForm()
-
-    return render(request, "login.html", {"form": form})
+        logger.debug(f"[LOGIN] GET request - displaying login form")
+    
+    return render(request, "login.html", {
+        "form": form
+    })
 
 def logout_view(request):
     """Handle user logout."""

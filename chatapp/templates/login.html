@@ -103,12 +103,21 @@
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                     {{ field }}
                     {% if field.errors %}
-                        <div style="color: #ffcdd2; font-size: 0.8rem; margin-top: 0.3rem;">{{ field.errors.0 }}</div>
+                        <div style="color: #ffcdd2; font-size: 0.8rem; margin-top: 0.3rem; padding: 0.4rem; background: rgba(244, 67, 54, 0.15); border-radius: 5px;">
+                            {% for error in field.errors %}
+                                <div>❌ {{ error }}</div>
+                            {% endfor %}
+                        </div>
                     {% endif %}
                 </div>
             {% endfor %}
-            <button type="submit" class="submit-btn">Sign In 🚀</button>
+            <button type="submit" class="submit-btn">🔓 Sign In</button>
         </form>
+
+        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.2); text-align: center; font-size: 0.85rem; color: rgba(255, 255, 255, 0.7);">
+            <p>First time? <a href="{% url 'register' %}" style="color: #667eea; text-decoration: none; font-weight: 600;">Create an account →</a></p>
+            <p style="margin-top: 0.5rem; font-size: 0.75rem;">Need admin credentials? Contact the Administrator</p>
+        </div>
     </div>
 </div>
 {% endblock %}
