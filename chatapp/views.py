@@ -315,16 +315,22 @@ def login_view(request):
             user = authenticate(username=username, password=password)
             
             if user is not None:
-                # Check if user is approved or is an admin
-                profile, created = UserProfile.objects.get_or_create(user=user)
-                if profile.is_approved or user.is_superuser:
-                    login(request, user)
-                    return redirect("dashboard" if user.is_superuser else "home")
-                else:
-                    return render(request, "login.html", {
-                        "form": form,
-                        "error": "Your account is pending approval by the Admin."
-                    })
+                try:
+                    profile = user.profile
+                    if profile.is_approved or user.is_superuser:
+                        login(request, user)
+                        return redirect("dashboard") if user.is_superuser else redirect("home")
+                    else:
+                        return render(request, "login.html", {
+                            "form": form,
+                            "error": "Your account is pending approval by the Admin."
+                        })
+                except UserProfile.DoesNotExist:
+                    if user.is_superuser:
+                        UserProfile.objects.create(user=user, is_approved=True)
+                        login(request, user)
+                        return redirect("dashboard")
+                    return render(request, "login.html", {"form": form, "error": "Profile missing. Please contact Admin."})
     else:
         form = AuthenticationForm()
     return render(request, "login.html", {"form": form})

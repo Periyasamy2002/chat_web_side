@@ -12,7 +12,7 @@ class UserProfile(models.Model):
     """Profile to track if a registered user is approved by admin"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     is_approved = models.BooleanField(default=False)
-    mobile_number = models.CharField(max_length=15, blank=True, null=True)
+    mobile_number = models.CharField(max_length=15, blank=True, null=True, verbose_name="Mobile Number")
 
     def __str__(self):
         return f"{self.user.username} - Approved: {self.is_approved}"
