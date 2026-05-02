@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .dashboard-container { max-width: 1000px; margin: 2rem auto; padding: 1rem; color: white; }
+    .dashboard-header { margin-bottom: 2rem; text-align: center; }
+    .dashboard-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+    
+    .card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        padding: 1.5rem;
+        border: 1.5px solid rgba(102, 126, 234, 0.3);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    
+    .card h2 { margin-bottom: 1.2rem; font-size: 1.4rem; color: #f093fb; display: flex; align-items: center; gap: 0.5rem; }
+    
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.95rem; }
+    th, td { padding: 1rem; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+    th { background: rgba(102, 126, 234, 0.4); text-transform: uppercase; letter-spacing: 1px; }
+    tr:hover { background: rgba(255, 255, 255, 0.05); }
+    
+    .btn {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+    
+    .btn-approve { background: #4CAF50; color: white; }
+    .btn-approve:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3); }
+
+    .btn-reject { background: #ff9800; color: white; }
+    .btn-reject:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3); }
+
+    .btn-delete { background: #f44336; color: white; }
+    .btn-delete:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(244, 67, 54, 0.3); }
+    
+    .group-item { padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; }
+    code { background: rgba(0,0,0,0.3); padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace; }
+
+    @media (min-width: 900px) { .dashboard-grid { grid-template-columns: 1.5fr 1fr; } }
+</style>
+
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>👑 Admin Control Panel</h1>
+        <p>Manage user approvals and monitor chat activities</p>
+    </div>
+    
+    <div class="dashboard-grid">
+        <!-- PENDING USERS SECTION -->
+        <div class="card">
+            <h2>⏳ Pending Approvals</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User Info</th>
+                        <th>Mobile</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for profile in pending_users %}
+                    <tr>
+                        <td>
+                            <strong>{{ profile.user.username }}</strong><br>
+                            <span style="font-size: 0.75rem; opacity: 0.7;">{{ profile.user.email }}</span>
+                        </td>
+                        <td>{{ profile.mobile_number|default:"-" }}</td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <a href="{% url 'approve_user' profile.id %}" class="btn btn-approve">Approve</a>
+                                <a href="{% url 'reject_user' profile.id %}" class="btn btn-reject" onclick="return confirm('Reject and delete this user?')">Reject</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.4);">No pending approvals.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- APPROVED USERS SECTION -->
+        <div class="card">
+            <h2>✅ Approved Users</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User Info</th>
+                        <th>Mobile</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for profile in approved_users %}
+                    <tr>
+                        <td>
+                            <strong>{{ profile.user.username }}</strong><br>
+                            <span style="font-size: 0.75rem; opacity: 0.7;">{{ profile.user.email }}</span>
+                        </td>
+                        <td>{{ profile.mobile_number|default:"-" }}</td>
+                        <td>
+                            <a href="{% url 'delete_user' profile.id %}" class="btn btn-delete" onclick="return confirm('Permanently delete this user?')">Delete</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.4);">No approved users yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- GROUPS OVERVIEW -->
+        <div class="card">
+            <h2>💬 Active Chat Groups</h2>
+            <div style="max-height: 500px; overflow-y: auto;">
+                {% for group in groups %}
+                <div class="group-item">
+                    <div><strong>{{ group.name }}</strong><br><code>{{ group.code }}</code></div>
+                    <a href="{% url 'group' group.code %}" class="btn" style="background: rgba(255,255,255,0.1); color: white;">Join</a>
+                </div>
+                {% empty %}
+                <p style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.4);">No groups created yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,11 +1,21 @@
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
+from django.contrib.auth.models import User
 
 # Constants
 ONLINE_TIMEOUT_MINUTES = 5
 INACTIVITY_DELETE_MINUTES = 360  # 12 hours 720
 NEW_GROUP_DELETE_MINUTES = 720  # 1 day 1440
+
+class UserProfile(models.Model):
+    """Profile to track if a registered user is approved by admin"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    is_approved = models.BooleanField(default=False)
+    mobile_number = models.CharField(max_length=15, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.user.username} - Approved: {self.is_approved}"
 
 class AnonymousUser(models.Model):
     """Track anonymous users without authentication"""

@@ -6,6 +6,16 @@ from django.conf.urls.static import static
 urlpatterns = [
     path("", views.home, name="home"),
     path("chat/", views.chat, name="chat"),
+    
+    # Auth URLs
+    path("login/", views.login_view, name="login"),
+    path("register/", views.register_view, name="register"),
+    path("logout/", views.logout_view, name="logout"),
+    path("dashboard/", views.dashboard, name="dashboard"),
+    path("dashboard/approve/<int:profile_id>/", views.approve_user, name="approve_user"),
+    path("dashboard/reject/<int:profile_id>/", views.reject_user, name="reject_user"),
+    path("dashboard/delete-user/<int:profile_id>/", views.delete_user, name="delete_user"),
+
     path("group/<str:code>/", views.group, name="group"),
     path("group/<str:code>/upload-voice/", views.upload_voice_message, name="upload_voice"),
     path("group/<str:code>/synthesize-voice/", views.synthesize_voice_message, name="synthesize_voice"),

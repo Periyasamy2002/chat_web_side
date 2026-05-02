@@ -1,7 +1,7 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 
 from chatproject import settings
-from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES
+from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES, UserProfile
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
@@ -9,6 +9,8 @@ from datetime import timedelta
 import uuid
 import logging
 import io
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from .utils.translator import translate_text, normalize_to_professional_english, synthesize_speech_with_gtts
 from .utils.tamil_detector import is_valid_english_only, get_language_violation_details, contains_tamil_script, ensure_english_only_display, ensure_tamil_only_display, TAMIL_SCRIPT_START, TAMIL_SCRIPT_END, contains_tanglish
 
@@ -284,6 +286,98 @@ def save_message(group, content, english_version, tamil_version, display_content
     return message
 
 
+def register_view(request):
+    """Handle user registration with mandatory admin approval."""
+    if request.method == "POST":
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            email = request.POST.get('email')
+            mobile = request.POST.get('mobile')
+            user = form.save()
+            user.email = email
+            user.save(update_fields=['email'])
+            UserProfile.objects.create(user=user, is_approved=False, mobile_number=mobile)
+            return render(request, "login.html", {
+                "info": "Registration successful! Please wait for Admin approval before logging in."
+            })
+    else:
+        form = UserCreationForm()
+    return render(request, "register.html", {"form": form})
+
+
+def login_view(request):
+    """Handle user login and check for approval status."""
+    if request.method == "POST":
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            
+            if user is not None:
+                # Check if user is approved or is an admin
+                profile, created = UserProfile.objects.get_or_create(user=user)
+                if profile.is_approved or user.is_superuser:
+                    login(request, user)
+                    return redirect("dashboard" if user.is_superuser else "home")
+                else:
+                    return render(request, "login.html", {
+                        "form": form,
+                        "error": "Your account is pending approval by the Admin."
+                    })
+    else:
+        form = AuthenticationForm()
+    return render(request, "login.html", {"form": form})
+
+
+def logout_view(request):
+    """Handle user logout."""
+    logout(request)
+    return redirect("login")
+
+
+def dashboard(request):
+    """Admin dashboard to manage users and view stats."""
+    if not request.user.is_superuser:
+        return redirect("home")
+    
+    pending_users = UserProfile.objects.filter(is_approved=False)
+    approved_users = UserProfile.objects.filter(is_approved=True).exclude(user__is_superuser=True)
+    all_groups = Group.objects.all()
+    return render(request, "dashboard.html", {
+        "pending_users": pending_users,
+        "approved_users": approved_users,
+        "groups": all_groups
+    })
+
+def approve_user(request, profile_id):
+    """Directly approve a user from the dashboard."""
+    if not request.user.is_superuser:
+        return redirect("home")
+    profile = get_object_or_404(UserProfile, id=profile_id)
+    profile.is_approved = True
+    profile.save()
+    return redirect("dashboard")
+
+def reject_user(request, profile_id):
+    """Reject and delete a pending user registration."""
+    if not request.user.is_superuser:
+        return redirect("home")
+    profile = get_object_or_404(UserProfile, id=profile_id)
+    user = profile.user
+    user.delete() # Cascade deletes profile
+    return redirect("dashboard")
+
+def delete_user(request, profile_id):
+    """Permanently delete an approved user."""
+    if not request.user.is_superuser:
+        return redirect("home")
+    profile = get_object_or_404(UserProfile, id=profile_id)
+    user = profile.user
+    user.delete() # Cascade deletes profile
+    return redirect("dashboard")
+
+
 def home(request):
     """Home page - entry point of the app."""
     return render(request, "home.html")
@@ -355,6 +449,19 @@ def chat(request):
 
 def group_manage(request):
     """New view to handle group creation and listing."""
+    # Protect view: Only Admin or Approved users can manage/create groups
+    if not request.user.is_authenticated:
+        return redirect("login")
+    
+    is_allowed = request.user.is_superuser
+    if not is_allowed:
+        # Ensure user has a profile and check approval status
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        is_allowed = profile.is_approved
+        
+    if not is_allowed:
+        return redirect("home")
+
     error = None
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
