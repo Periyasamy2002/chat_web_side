@@ -316,6 +316,13 @@ def login_view(request):
 
             try:
                 profile = user.profile
+            except UserProfile.DoesNotExist:
+                if user.is_superuser:
+                    profile = UserProfile.objects.create(user=user, is_approved=True)
+                else:
+                    profile = None
+
+            if profile:
                 if profile.is_approved or user.is_superuser:
                     logger.info(f"User {user.username} is approved/admin. Logging in...")
                     login(request, user)
@@ -326,14 +333,12 @@ def login_view(request):
                         "form": form,
                         "error": "Your account is pending approval by the Admin."
                     })
-
-            except UserProfile.DoesNotExist:
+            else:
                 logger.error(f"UserProfile missing for user: {user.username}")
                 return render(request, "login.html", {
                     "form": form,
                     "error": "Profile missing. Please contact the Admin."
                 })
-
         else:
             logger.warning(f"Login form invalid for: {request.POST.get('username')}. Errors: {form.errors.as_json()}")
             return render(request, "login.html", {
