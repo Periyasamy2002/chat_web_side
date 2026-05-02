@@ -84,6 +84,12 @@
             <div class="alert alert-info">{{ info }}</div>
         {% endif %}
 
+        {% if form.non_field_errors %}
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error">{{ error }}</div>
+            {% endfor %}
+        {% endif %}
+
         <form method="POST">
             {% csrf_token %}
             {% for field in form %}

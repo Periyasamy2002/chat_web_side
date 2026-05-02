@@ -308,33 +308,37 @@ def register_view(request):
 def login_view(request):
     if request.method == "POST":
         form = AuthenticationForm(request, data=request.POST)
+        logger.info(f"Login attempt for user: {request.POST.get('username')}")
 
         if form.is_valid():
             user = form.get_user()
+            logger.info(f"Form valid for user: {user.username}. Checking approval...")
 
             try:
                 profile = user.profile
-
                 if profile.is_approved or user.is_superuser:
+                    logger.info(f"User {user.username} is approved/admin. Logging in...")
                     login(request, user)
                     return redirect("dashboard") if user.is_superuser else redirect("home")
                 else:
+                    logger.warning(f"User {user.username} login blocked: Not approved.")
                     return render(request, "login.html", {
                         "form": form,
-                        "error": "Your account is pending approval by Admin"
+                        "error": "Your account is pending approval by the Admin."
                     })
 
             except UserProfile.DoesNotExist:
+                logger.error(f"UserProfile missing for user: {user.username}")
                 return render(request, "login.html", {
                     "form": form,
-                    "error": "Profile missing. Contact admin"
+                    "error": "Profile missing. Please contact the Admin."
                 })
 
         else:
-            # 👇 THIS IS THE MISSING PART
+            logger.warning(f"Login form invalid for: {request.POST.get('username')}. Errors: {form.errors.as_json()}")
             return render(request, "login.html", {
                 "form": form,
-                "error": "Invalid username or password"
+                "error": "Invalid username or password."
             })
 
     else:
