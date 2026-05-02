@@ -11,8 +11,11 @@ import traceback
 import re
 from typing import Optional, Tuple
 
-# Using new google.genai package (google.generativeai is deprecated)
-import google.genai as genai
+# Keep using google.generativeai (deprecated but stable)
+# Suppress FutureWarning for now - full migration planned
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 

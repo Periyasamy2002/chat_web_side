@@ -23,7 +23,11 @@ load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-import google.genai as genai
+# Keep using google.generativeai (deprecated but stable)
+# Suppress FutureWarning for now - full migration planned
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
+import google.generativeai as genai
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Constants
@@ -687,7 +691,12 @@ from pydub import AudioSegment, effects
 from gtts import gTTS
 
 from dotenv import load_dotenv
-import google.genai as genai
+
+# Keep using google.generativeai (deprecated but stable)
+# Suppress FutureWarning for now - full migration planned
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
+import google.generativeai as genai
 
 
 # ================================
