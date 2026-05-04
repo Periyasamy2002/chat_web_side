@@ -334,14 +334,13 @@ def register_view(request):
 
 def login_view(request):
     """
-    Enhanced login view with comprehensive debugging and error handling.
+    Enhanced login view - works for both admins (superusers) and regular users.
     
     Flow:
-    1. POST: Validate username/password
-    2. Check if user exists and has UserProfile
-    3. Check if user is approved or admin
-    4. Create session and redirect
-    5. Log detailed info for debugging
+    1. POST: Authenticate with Django's authenticate()
+    2. For admins (is_superuser=True): Direct login, no profile check needed
+    3. For regular users: Check UserProfile and approval status
+    4. Redirect to appropriate page (admin panel or home)
     """
     if request.method == "POST":
         username = request.POST.get('username', '').strip()
@@ -349,67 +348,72 @@ def login_view(request):
         
         logger.info(f"[LOGIN] Attempt for username: {username}")
         
-        # Step 1: Validate form
-        form = AuthenticationForm(request, data=request.POST)
-        
-        if not form.is_valid():
-            logger.warning(f"[LOGIN] Authentication FAILED for '{username}': {form.errors.as_json()}")
+        if not username or not password:
+            logger.warning(f"[LOGIN] Empty credentials submitted")
             return render(request, "login.html", {
-                "form": form,
-                "error": "❌ Invalid username or password. Please check your credentials.",
+                "form": AuthenticationForm(),
+                "error": "❌ Username and password required",
+            })
+        
+        # Authenticate user with Django's built-in auth
+        from django.contrib.auth import authenticate, login
+        user = authenticate(request, username=username, password=password)
+        
+        if user is None:
+            logger.warning(f"[LOGIN] Authentication FAILED for '{username}'")
+            return render(request, "login.html", {
+                "form": AuthenticationForm(),
+                "error": "❌ Invalid username or password",
                 "username": username
             })
         
-        # Step 2: Get authenticated user
-        user = form.get_user()
+        # ✅ Authentication successful
         logger.info(f"[LOGIN] User authenticated: {user.username} (ID: {user.id}, is_superuser: {user.is_superuser})")
         
-        # Step 3: Check UserProfile
-        try:
-            profile = user.profile
-            logger.info(f"[LOGIN] UserProfile found: is_approved={profile.is_approved}")
-        except UserProfile.DoesNotExist:
-            logger.warning(f"[LOGIN] UserProfile MISSING for user {user.username}")
-            
-            # Auto-create profile for superuser
-            if user.is_superuser:
-                profile = UserProfile.objects.create(user=user, is_approved=True)
-                logger.info(f"[LOGIN] Auto-created approved profile for superuser {user.username}")
-            else:
-                logger.error(f"[LOGIN] Cannot login: No profile for regular user {user.username}")
-                return render(request, "login.html", {
-                    "form": form,
-                    "error": "⚠️ Your profile is missing. Please contact the Administrator.",
-                    "username": username
-                })
-        
-        # Step 4: Check approval status
-        if profile.is_approved or user.is_superuser:
-            logger.info(f"[LOGIN] User {user.username} APPROVED. Creating session...")
+        # Check if admin/superuser
+        if user.is_superuser:
+            logger.info(f"[LOGIN] ✅ Admin user '{user.username}' logging in - accessing /admin/")
             
             # Ensure session exists
             if not request.session.session_key:
                 request.session.create()
             
-            # Create session and log in
+            # Login the user
             login(request, user)
+            logger.info(f"[LOGIN] Session created for admin: {request.session.session_key}")
             
-            # Verify session was created
-            logger.info(f"[LOGIN] Session created: {request.session.session_key}")
-            logger.info(f"[LOGIN] ✅ SUCCESS: User {user.username} logged in. Redirecting...")
-            
-            # Redirect to appropriate dashboard
-            redirect_url = "dashboard" if user.is_superuser else "home"
-            logger.info(f"[LOGIN] Redirecting to: {redirect_url}")
-            return redirect(redirect_url)
-        else:
-            logger.warning(f"[LOGIN] User {user.username} NOT APPROVED. is_approved={profile.is_approved}")
+            # Redirect to Django admin panel
+            return redirect('/admin/')
+        
+        # Regular user - check profile and approval
+        try:
+            profile = user.profile
+        except UserProfile.DoesNotExist:
+            # Auto-create profile for regular users
+            profile = UserProfile.objects.create(user=user, is_approved=False)
+            logger.info(f"[LOGIN] Auto-created profile for user: {user.username}")
+        
+        # Check if approved
+        if not profile.is_approved:
+            logger.warning(f"[LOGIN] User {user.username} NOT APPROVED")
             return render(request, "login.html", {
-                "form": form,
-                "error": "⏳ Your account is pending Admin approval. Please wait.",
-                "info": f"Your account '{username}' has been registered but needs approval.",
+                "form": AuthenticationForm(),
+                "error": "⏳ Your account is pending admin approval",
+                "info": f"Account '{username}' was registered but needs approval. Please wait.",
                 "username": username
             })
+        
+        # ✅ User approved - login
+        logger.info(f"[LOGIN] ✅ Regular user '{user.username}' approved - logging in")
+        
+        if not request.session.session_key:
+            request.session.create()
+        
+        login(request, user)
+        logger.info(f"[LOGIN] Session created for user: {request.session.session_key}")
+        
+        # Redirect to home/dashboard
+        return redirect('home')
     
     # GET request: Display login form
     else:
@@ -1649,36 +1653,90 @@ def synthesize_voice_message(request, code):
 
 
 from django.shortcuts import render, redirect
-from .models import AdminUser
+from django.contrib.auth.models import User
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
 
+@require_http_methods(["GET", "POST"])
 def admin_register_view(request):
+    """Create new Django admin (superuser) with protection."""
     error = None
     success = None
-
-    # 🔥 limit check
-    if AdminUser.objects.count() >= 3:
+    secret_key = os.getenv('ADMIN_SECRET_KEY', '')
+    
+    # 🔥 Check if secret key is required and validate it
+    provided_key = request.GET.get('key', '')
+    
+    # Count existing superusers
+    superuser_count = User.objects.filter(is_superuser=True).count()
+    can_register = True
+    
+    # If superuser exists, require secret key
+    if superuser_count > 0 and secret_key:
+        if provided_key != secret_key:
+            can_register = False
+            error = "❌ Invalid or missing admin registration key"
+    
+    # Check admin limit
+    if superuser_count >= 3:
         return render(request, "admin_register.html", {
-            "error": "❌ Admin limit reached (only 3 allowed)"
+            "error": "❌ Admin limit reached (only 3 allowed)",
+            "superuser_count": superuser_count
         })
 
     if request.method == "POST":
-        username = request.POST.get("username")
-        email = request.POST.get("email")
-        password = request.POST.get("password")
+        if not can_register:
+            return render(request, "admin_register.html", {
+                "error": error,
+                "superuser_count": superuser_count
+            })
+        
+        username = request.POST.get("username", "").strip()
+        email = request.POST.get("email", "").strip()
+        password = request.POST.get("password", "").strip()
+        password_confirm = request.POST.get("password_confirm", "").strip()
 
-        if not username or not password:
-            error = "All fields required"
-        elif AdminUser.objects.filter(username=username).exists():
-            error = "Username already exists"
+        # Validation
+        if not username or not email or not password or not password_confirm:
+            error = "⚠️ All fields are required"
+        elif len(username) < 3:
+            error = "⚠️ Username must be at least 3 characters"
+        elif len(password) < 8:
+            error = "⚠️ Password must be at least 8 characters"
+        elif password != password_confirm:
+            error = "⚠️ Passwords don't match"
+        elif not email or '@' not in email:
+            error = "⚠️ Valid email required"
+        elif User.objects.filter(username=username).exists():
+            error = "⚠️ Username already exists"
+        elif User.objects.filter(email=email).exists():
+            error = "⚠️ Email already exists"
         else:
-            AdminUser.objects.create(
-                username=username,
-                email=email,
-                password=password
-            )
-            success = "✅ Admin registered successfully"
+            try:
+                # ✅ Create Django superuser with proper password hashing
+                user = User.objects.create_superuser(
+                    username=username,
+                    email=email,
+                    password=password
+                )
+                logger.info(f"✅ New superuser created: {username} ({email})")
+                
+                success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
+                messages.success(request, f"Admin account created! You can now login with username '{username}'")
+                
+                # Redirect to login after 2 seconds (JS in template)
+                return render(request, "admin_register.html", {
+                    "success": success,
+                    "superuser_count": superuser_count + 1,
+                    "redirect": True
+                })
+            except Exception as e:
+                logger.error(f"❌ Error creating admin: {str(e)}")
+                error = f"❌ Error creating admin: {str(e)}"
 
     return render(request, "admin_register.html", {
         "error": error,
-        "success": success
+        "success": success,
+        "superuser_count": superuser_count,
+        "key_required": superuser_count > 0 and secret_key and not can_register
     })

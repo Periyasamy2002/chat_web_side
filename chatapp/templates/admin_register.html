@@ -1,29 +1,275 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Admin Register</title>
+    <title>Admin Registration | Django Admin Setup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+        .admin-count {
+            background: #f0f4ff;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            color: #667eea;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #c62828;
+        }
+        .success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4caf50;
+            text-align: center;
+        }
+        .info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #1565c0;
+            font-size: 13px;
+        }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.3s ease;
+        }
+        input[type="text"]:focus,
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 8px rgba(102, 126, 234, 0.2);
+            background: #f8faff;
+        }
+        button {
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .button-group button {
+            flex: 1;
+            margin: 0;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        .back-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+        .redirecting {
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .countdown {
+            font-weight: bold;
+            color: #667eea;
+        }
+        .disabled-state {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+    </style>
 </head>
 <body>
 
-<h2>Admin Register (Max 3)</h2>
+<div class="container">
+    <h1>👨‍💼 Django Admin Registration</h1>
+    <p class="subtitle">Create an administrator account for your Django application</p>
 
-{% if error %}
-<p style="color:red">{{ error }}</p>
+    <div class="admin-count">
+        Current Admins: <strong>{{ superuser_count }}/3</strong>
+    </div>
+
+    {% if error %}
+    <div class="error">🔴 {{ error }}</div>
+    {% endif %}
+
+    {% if success %}
+    <div class="success">
+        ✅ {{ success }}
+        <div class="redirecting">
+            Redirecting to login in <span class="countdown" id="countdown">5</span> seconds...
+        </div>
+    </div>
+    {% endif %}
+
+    {% if key_required %}
+    <div class="error">🔐 Admin registration requires a secret key. Contact the administrator.</div>
+    {% endif %}
+
+    {% if superuser_count < 3 %}
+        {% if not success %}
+        <form method="POST" id="admin-form">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="username">👤 Username</label>
+                <input type="text" id="username" name="username" placeholder="Choose admin username" required minlength="3">
+            </div>
+
+            <div class="form-group">
+                <label for="email">📧 Email Address</label>
+                <input type="email" id="email" name="email" placeholder="Admin email address" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">🔒 Password</label>
+                <input type="password" id="password" name="password" placeholder="At least 8 characters" required minlength="8">
+            </div>
+
+            <div class="form-group">
+                <label for="password_confirm">🔒 Confirm Password</label>
+                <input type="password" id="password_confirm" name="password_confirm" placeholder="Re-enter password" required>
+            </div>
+
+            <div class="info">
+                ℹ️ <strong>Password Requirements:</strong>
+                <ul style="margin: 8px 0 0 20px; font-size: 12px;">
+                    <li>Minimum 8 characters</li>
+                    <li>Unique and strong</li>
+                    <li>Will have full admin access</li>
+                </ul>
+            </div>
+
+            <button type="submit" id="register-btn">✅ Create Admin Account</button>
+        </form>
+
+        <script>
+            document.getElementById('admin-form').addEventListener('submit', function(e) {
+                const pw1 = document.getElementById('password').value;
+                const pw2 = document.getElementById('password_confirm').value;
+                
+                if (pw1 !== pw2) {
+                    e.preventDefault();
+                    alert('❌ Passwords do not match!');
+                    return false;
+                }
+                
+                if (pw1.length < 8) {
+                    e.preventDefault();
+                    alert('❌ Password must be at least 8 characters long!');
+                    return false;
+                }
+            });
+        </script>
+        {% endif %}
+    {% else %}
+    <div class="error" style="text-align: center; font-size: 16px;">
+        <strong>⛔ Maximum admins (3) already created!</strong><br>
+        <p style="margin-top: 10px; font-size: 14px;">No more admin accounts can be registered.</p>
+    </div>
+    {% endif %}
+
+    <div class="back-link">
+        <a href="/">← Back to Home</a> | 
+        <a href="/login/">Login →</a>
+    </div>
+</div>
+
+{% if redirect %}
+<script>
+    let count = 5;
+    const countdown = document.getElementById('countdown');
+    const interval = setInterval(() => {
+        count--;
+        if (countdown) countdown.textContent = count;
+        if (count <= 0) {
+            clearInterval(interval);
+            window.location.href = '/login/';
+        }
+    }, 1000);
+</script>
 {% endif %}
-
-{% if success %}
-<p style="color:green">{{ success }}</p>
-{% endif %}
-
-<form method="POST">
-    {% csrf_token %}
-
-    <input type="text" name="username" placeholder="Username"><br><br>
-    <input type="email" name="email" placeholder="Email"><br><br>
-    <input type="password" name="password" placeholder="Password"><br><br>
-
-    <button type="submit">Register</button>
-</form>
 
 </body>
 </html>
