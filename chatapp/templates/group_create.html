@@ -16,6 +16,8 @@
     th { background: rgba(102, 126, 234, 0.4); }
     tr:hover { background: rgba(255,255,255,0.05); }
     .status-online { color: #4CAF50; font-weight: bold; }
+    .expiry-timer { font-family: monospace; color: #f093fb; font-weight: bold; }
+    .expired-text { color: #f44336; font-weight: bold; }
 </style>
 
 <div class="manage-container">
@@ -51,9 +53,10 @@
             <thead>
                 <tr>
                     <th>Group Name</th>
-                    <th>Code</th>
+                    <th>Owner</th>
                     <th>Messages</th>
                     <th>Online</th>
+                    <th>Expires In</th>
                     <th>Last Active</th>
                     <th>Action</th>
                 </tr>
@@ -62,12 +65,13 @@
                 {% for g in groups %}
                 <tr>
                     <td>{{ g.name }}</td>
-                    <td><code>{{ g.code }}</code></td>
+                    <td><small>{{ g.owner }}</small><br><code>{{ g.code }}</code></td>
                     <td>{{ g.message_count }}</td>
                     <td><span class="status-online">{{ g.online_count }}</span></td>
+                    <td><span class="expiry-timer" data-expiry="{{ g.expiry_iso }}">--:--:--</span></td>
                     <td>{{ g.last_activity|date:"d M, H:i" }}</td>
                     <td>
-                        <a href="{% url 'delete_group_entirely' g.code %}" 
+                        <a href="{% url 'delete_group_entirely' g.code %}"
                            class="btn btn-danger" 
                            onclick="return confirm('Delete this group and all messages?')">🗑️ Delete</a>
                     </td>
@@ -85,4 +89,34 @@
         <a href="{% url 'chat' %}" style="color: white; text-decoration: none;">← Back to Join Page</a>
     </div>
 </div>
+
+<script>
+    function updateCountdowns() {
+        const now = new Date();
+        document.querySelectorAll('.expiry-timer').forEach(timer => {
+            const expiryDate = new Date(timer.dataset.expiry);
+            const timeLeft = expiryDate - now;
+
+            if (timeLeft <= 0) {
+                timer.innerHTML = '<span class="expired-text">Expired</span>';
+                // Optional: Auto-hide the row if expired
+                const row = timer.closest('tr');
+                if (row) row.style.opacity = '0.5';
+            } else {
+                const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+                timer.textContent = 
+                    (hours < 10 ? '0' : '') + hours + ":" + 
+                    (minutes < 10 ? '0' : '') + minutes + ":" + 
+                    (seconds < 10 ? '0' : '') + seconds;
+            }
+        });
+    }
+
+    // Update every second
+    setInterval(updateCountdowns, 1000);
+    updateCountdowns(); // Initial call
+</script>
 {% endblock %}

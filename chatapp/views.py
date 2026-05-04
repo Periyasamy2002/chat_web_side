@@ -383,7 +383,7 @@ def login_view(request):
             logger.info(f"[LOGIN] Session created for admin: {request.session.session_key}")
             
             # Redirect to Django admin panel
-            return redirect('/admin/')
+            return redirect('home')
         
         # Regular user - check profile and approval
         try:
@@ -556,33 +556,45 @@ def group_manage(request):
     if not is_allowed:
         return redirect("home")
 
+    # 🕒 Auto Expiry Logic: Delete groups older than 3 hours
+    expiry_limit = timezone.now() - timedelta(hours=3)
+    Group.objects.filter(created_at__lt=expiry_limit).delete()
+
     error = None
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
         name = request.POST.get("name", "").strip() or code
-        
+
         if not code:
             error = "Group code is required"
         elif Group.objects.filter(code=code).exists():
             error = "Group code already exists"
         else:
-            Group.objects.create(code=code, name=name)
+            # Save group with owner info
+            Group.objects.create(code=code, name=name, created_by=request.user)
             return redirect("group_manage")
 
-    # Prepare group data with stats for the listing table
-    groups = Group.objects.all().order_by('-last_activity')
-    groups_data = []
+    # 👁️ Visibility Rules: Admin sees all, Users see only their own
+    if request.user.is_superuser:
+        groups = Group.objects.all().order_by('-created_at')
+    else:
+        groups = Group.objects.filter(created_by=request.user).order_by('-created_at')
 
+    groups_data = []
     for g in groups:
+        # Calculate exact expiry timestamp for the countdown (created_at + 3 hours)
+        expiry_time = g.created_at + timedelta(hours=3)
         groups_data.append({
             'code': g.code,
             'name': g.name,
             'created_at': g.created_at,
+            'expiry_iso': expiry_time.isoformat(),
             'message_count': g.messages.count(),
             'online_count': g.get_group_online_count(),
-            'last_activity': g.last_activity
+            'last_activity': g.last_activity,
+            'owner': g.created_by.username if g.created_by else "System"
         })
-        
+
     return render(request, "group_create.html", {
         "groups": groups_data, 
         "error": error
