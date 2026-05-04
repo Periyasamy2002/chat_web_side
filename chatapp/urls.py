@@ -32,4 +32,9 @@ urlpatterns = [
     # Group Management and Creation
     path("group-manage/", views.group_manage, name="group_manage"),
     path("group-delete/<str:code>/", views.delete_group_entirely, name="delete_group_entirely"),
+    
+    path('admin-register/',views.admin_register_view, name='admin_register'),
+    
+    
+    
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

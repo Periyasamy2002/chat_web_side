@@ -1644,3 +1644,41 @@ def synthesize_voice_message(request, code):
     except Exception as e:
         logger.error(f"synthesize_voice_message error: {str(e)}")
         return JsonResponse({'error': f'Synthesis error: {str(e)}'}, status=400)
+
+
+
+
+from django.shortcuts import render, redirect
+from .models import AdminUser
+
+def admin_register_view(request):
+    error = None
+    success = None
+
+    # 🔥 limit check
+    if AdminUser.objects.count() >= 3:
+        return render(request, "admin_register.html", {
+            "error": "❌ Admin limit reached (only 3 allowed)"
+        })
+
+    if request.method == "POST":
+        username = request.POST.get("username")
+        email = request.POST.get("email")
+        password = request.POST.get("password")
+
+        if not username or not password:
+            error = "All fields required"
+        elif AdminUser.objects.filter(username=username).exists():
+            error = "Username already exists"
+        else:
+            AdminUser.objects.create(
+                username=username,
+                email=email,
+                password=password
+            )
+            success = "✅ Admin registered successfully"
+
+    return render(request, "admin_register.html", {
+        "error": error,
+        "success": success
+    })

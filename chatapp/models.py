@@ -183,3 +183,19 @@ class DeletedMessage(models.Model):
 
     def __str__(self):
         return f"{self.session_id} deleted {self.message.id}"
+
+
+from django.db import models
+from django.contrib.auth.hashers import make_password
+
+class AdminUser(models.Model):
+    username = models.CharField(max_length=100, unique=True)
+    email = models.EmailField()
+    password = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # hash password before save
+        if not self.password.startswith("pbkdf2"):
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
