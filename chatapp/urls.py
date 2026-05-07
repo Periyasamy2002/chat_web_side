@@ -16,6 +16,11 @@ urlpatterns = [
     path("dashboard/reject/<int:profile_id>/", views.reject_user, name="reject_user"),
     path("dashboard/delete-user/<int:profile_id>/", views.delete_user, name="delete_user"),
 
+    # Language Management
+    path("dashboard/language/add/", views.add_language, name="add_language"),
+    path("dashboard/language/toggle/<int:lang_id>/", views.toggle_language, name="toggle_language"),
+    path("dashboard/language/delete/<int:lang_id>/", views.delete_language, name="delete_language"),
+
     path("group/<str:code>/", views.group, name="group"),
     path("group/<str:code>/upload-voice/", views.upload_voice_message, name="upload_voice"),
     path("group/<str:code>/synthesize-voice/", views.synthesize_voice_message, name="synthesize_voice"),

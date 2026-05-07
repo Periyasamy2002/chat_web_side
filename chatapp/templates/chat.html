@@ -264,13 +264,15 @@
             <label for="language_mode">Group Input Language</label>
             <select name="language_mode" id="language_mode" required>
                 <option value="">Select Language</option>
+                {% for lang in languages %}
+                <option value="{{ lang.name|lower }}">{% if lang.name == 'English' %}🌐{% elif lang.name == 'Tamil' %}🇮🇳{% else %}🌍{% endif %} {{ lang.name }} - Group accepts {{ lang.name }} input only</option>
+                {% empty %}
                 <option value="english">🌐 English - Group accepts English input only</option>
                 <option value="tamil">🇮🇳 Tamil - Group accepts Tamil input only</option>
+                {% endfor %}
             </select>
             <small style="color: rgba(255, 255, 255, 0.7); display: block; margin-top: 0.5rem;">
-                <strong>English:</strong> All users in this group must send messages in English only.
-                <br>
-                <strong>Tamil:</strong> All users in this group must send messages in Tamil only.
+                <strong>Note:</strong> All users in this group must send messages in the selected language only.
             </small>
         </div>
 

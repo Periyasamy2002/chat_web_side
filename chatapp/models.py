@@ -2,6 +2,9 @@ from django.db import models
 from django.utils import timezone
 from datetime import timedelta
 from django.contrib.auth.models import User
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Constants
 ONLINE_TIMEOUT_MINUTES = 5
@@ -19,28 +22,27 @@ class UserProfile(models.Model):
 
 class AnonymousUser(models.Model):
     """Track anonymous users without authentication"""
-    LANGUAGE_MODE_CHOICES = [
-        ('english', 'English Mode - Display only English, reject Tamil/Tanglish'),
-        ('tamil', 'Tamil Mode - Display only Tamil, accept Tamil/English input'),
-    ]
-    
     session_id = models.CharField(max_length=255, unique=True)
     user_name = models.CharField(max_length=100)
     is_online = models.BooleanField(default=True)
     last_seen = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
     language_mode = models.CharField(
-        max_length=10,
-        choices=LANGUAGE_MODE_CHOICES,
+        max_length=50,
         default='english',
-        help_text='User language display mode: English only or Tamil only'
+        help_text='User language display mode (e.g., english, tamil, hindi, etc.)'
     )
 
     def __str__(self):
-        return f"{self.user_name} ({self.get_language_mode_display()})"
+        return f"{self.user_name} ({self.language_mode.capitalize()} Mode)"
 
     class Meta:
         ordering = ['-last_seen']
+        indexes = [
+            models.Index(fields=['is_online', 'last_seen']),
+            models.Index(fields=['session_id']),
+            models.Index(fields=['language_mode']),
+        ]
 
 class Group(models.Model):
     name = models.CharField(max_length=100)
@@ -126,6 +128,9 @@ class Message(models.Model):
     tamil_content = models.TextField(blank=True, null=True, help_text='Tamil version of the message (auto-translated)')
     english_content = models.TextField(blank=True, null=True, help_text='Professional English version of the message')
     
+    # Backwards compatibility for old translations field (deprecated but kept for legacy support)
+    translations = models.TextField(blank=True, null=True, default='', help_text='Legacy translations field (deprecated)')
+    
     timestamp = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
 
@@ -134,6 +139,9 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['group', 'timestamp']),
             models.Index(fields=['session_id', 'timestamp']),
+            models.Index(fields=['message_type']),
+            models.Index(fields=['is_deleted']),
+            models.Index(fields=['timestamp']),
         ]
 
     def __str__(self):
@@ -180,6 +188,7 @@ class DeletedMessage(models.Model):
         unique_together = ('message', 'session_id')
         indexes = [
             models.Index(fields=['message', 'session_id']),
+            models.Index(fields=['session_id']),
         ]
 
     def __str__(self):
@@ -200,3 +209,12 @@ class AdminUser(models.Model):
         if not self.password.startswith("pbkdf2"):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
+
+class Language(models.Model):
+    """Model to store supported languages and their activation status."""
+    name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({'Active' if self.is_active else 'Disabled'})"

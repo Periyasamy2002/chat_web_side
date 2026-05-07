@@ -1,597 +1,500 @@
 """
-Translation utility module for Google Gemini API integration.
-Provides functions to translate messages between supported languages.
-Handles Tamil/Tanglish normalization and message content formatting.
+Production-grade translation utility for the chat app.
+
+This module centralizes translation, normalization, and language detection
+for the supported chat languages. It supports:
+- universal Indic script detection for Tamil, Hindi, Telugu, Malayalam,
+  Kannada, Bengali, Gujarati, Marathi, Punjabi, Urdu
+- Tanglish detection and normalization support
+- English normalization and US English standardization
+- explicit Gemini source/target translation guidance
+- safe fallbacks and logging for production use
 """
 
 import os
+import re
 import logging
 import warnings
 import traceback
-import re
 from typing import Optional, Tuple
 
-# Keep using google.generativeai (deprecated but stable)
-# Suppress FutureWarning for now - full migration planned
-import warnings
+# Use google.generativeai for current compatibility.
 warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
 import google.generativeai as genai
 
+# Django imports for caching
+from django.core.cache import cache
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini API
+# =========================
+# CONFIGURATION
+# =========================
+
+DEFAULT_SUPPORTED_LANGUAGES = [
+    "English",
+    "Tamil",
+    "Hindi",
+    "Telugu",
+    "Malayalam",
+    "Kannada",
+    "Bengali",
+    "Gujarati",
+    "Marathi",
+    "Punjabi",
+    "Urdu",
+]
+
+LANGUAGE_ALIASES = {
+    'en': 'English',
+    'english': 'English',
+    'ta': 'Tamil',
+    'tamil': 'Tamil',
+    'hi': 'Hindi',
+    'hindi': 'Hindi',
+    'te': 'Telugu',
+    'telugu': 'Telugu',
+    'ml': 'Malayalam',
+    'malayalam': 'Malayalam',
+    'kn': 'Kannada',
+    'kannada': 'Kannada',
+    'bn': 'Bengali',
+    'bengali': 'Bengali',
+    'gu': 'Gujarati',
+    'gujarati': 'Gujarati',
+    'mr': 'Marathi',
+    'marathi': 'Marathi',
+    'pa': 'Punjabi',
+    'punjabi': 'Punjabi',
+    'ur': 'Urdu',
+    'urdu': 'Urdu',
+}
+
+# ISO code mapping for supported languages - Required for proper validation and API guidance
+LANGUAGE_CODES = {
+    'English': 'en',
+    'Tamil': 'ta',
+    'Hindi': 'hi',
+    'Malayalam': 'ml',
+    'Telugu': 'te',
+    'Kannada': 'kn',
+    'Bengali': 'bn',
+    'Gujarati': 'gu',
+    'Marathi': 'mr',
+    'Punjabi': 'pa',
+    'Urdu': 'ur'
+}
+
+RAW_SUPPORTED_LANGUAGES = os.getenv(
+    'SUPPORTED_LANGUAGES',
+    ','.join(DEFAULT_SUPPORTED_LANGUAGES)
+)
+SUPPORTED_LANGUAGES = []
+for entry in RAW_SUPPORTED_LANGUAGES.split(','):
+    normalized = entry.strip()
+    if not normalized:
+        continue
+    normalized = LANGUAGE_ALIASES.get(normalized.lower(), normalized.title())
+    if normalized not in SUPPORTED_LANGUAGES:
+        SUPPORTED_LANGUAGES.append(normalized)
+
+SUPPORTED_LANGUAGE_SET = {lang.lower() for lang in SUPPORTED_LANGUAGES}
 API_KEY = os.getenv('GEMINI_API_KEY')
-SUPPORTED_LANGUAGES = os.getenv('SUPPORTED_LANGUAGES', 'English,Tamil').split(',')
 DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'English').strip()
+MODEL_NAME = os.getenv('TRANSLATOR_MODEL', 'gemini-2.5-flash').strip()
 
-print("[TRANSLATOR_INIT] API_KEY loaded:", "YES (length: {})".format(len(API_KEY)) if API_KEY else "NO")
-print("[TRANSLATOR_INIT] SUPPORTED_LANGUAGES:", SUPPORTED_LANGUAGES)
-print("[TRANSLATOR_INIT] DEFAULT_LANGUAGE:", DEFAULT_LANGUAGE)
+LANGUAGE_SCRIPT_PATTERNS = {
+    'Tamil': re.compile(r'[\u0B80-\u0BFF]'),
+    'Telugu': re.compile(r'[\u0C00-\u0C7F]'),
+    'Kannada': re.compile(r'[\u0C80-\u0CFF]'),
+    'Malayalam': re.compile(r'[\u0D00-\u0D7F]'),
+    'Bengali': re.compile(r'[\u0980-\u09FF]'),
+    'Gujarati': re.compile(r'[\u0A80-\u0AFF]'),
+    'Devanagari': re.compile(r'[\u0900-\u097F]'),
+    'Arabic': re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]'),
+}
 
-# Configure Gemini API
+DEVANAGARI_KEYWORDS = {
+    'Marathi': [
+        'आहे', 'मला', 'तू', 'तो', 'ती', 'आम्ही', 'तुम्ही', 'हा', 'काय',
+        'किती', 'होय', 'नाही', 'माझं', 'माझी', 'मला', 'हे', 'आहेत', 'लागेल',
+    ],
+    'Hindi': [
+        'है', 'हूँ', 'हुआ', 'हुई', 'मैं', 'तुम', 'वह', 'यह', 'क्या',
+        'कहाँ', 'क्यों', 'क्योंकि', 'नहीं', 'हाँ', 'होता', 'रहा', 'रही',
+        'रहे', 'दोस्त', 'आज', 'कल', 'मैंने', 'तुम्हें', 'तुम्हारा',
+    ],
+}
+
+TANGLISH_PATTERNS = [
+    r'\bvanakkam\b', r'\bnamaskar\b', r'\bnamaste\b', r'\bayyo\b',
+    r'\baiyyo\b', r'\bdei\b', r'\bmachi\b', r'\bmachan\b',
+    r'\bsolra\b', r'\bsolla\b', r'\bthamil\b', r'\bthamizh\b',
+    r'\btamizh\b', r'\bpadikalam\b', r'\bpesi\b', r'\bsandhosham\b',
+    r'\bvaalkai\b', r'\bvalkai\b', r'\benna\b', r'\bappa\b',
+    r'\bappa\b', r'\bpa\b', r'\bka\b', r'\bvecha\b',
+]
+
+BRITISH_TO_US_ENGLISH = {
+    'colour': 'color', 'favour': 'favor', 'honour': 'honor', 'labour': 'labor',
+    'harbour': 'harbor', 'centre': 'center', 'metre': 'meter', 'theatre': 'theater',
+    'travelling': 'traveling', 'realise': 'realize', 'organise': 'organize',
+    'recognise': 'recognize', 'apologise': 'apologize', 'analyse': 'analyze',
+    'licence': 'license', 'defence': 'defense', 'offence': 'offense',
+    'grey': 'gray', 'cheque': 'check', 'gaol': 'jail', 'kerb': 'curb',
+    'programme': 'program',
+}
+
+logger.info('TRANSLATOR_INIT supported_languages=%s model=%s', SUPPORTED_LANGUAGES, MODEL_NAME)
 if API_KEY:
     try:
         genai.configure(api_key=API_KEY)
-        print("[TRANSLATOR_INIT] OK Gemini API configured successfully")
-    except Exception as e:
-        print(f"[TRANSLATOR_INIT] FAILED Error configuring Gemini API: {e}")
-        logger.error(f"Failed to configure Gemini API: {e}")
+        logger.info('TRANSLATOR_INIT Gemini API configured successfully')
+    except Exception as exc:
+        logger.error('TRANSLATOR_INIT Gemini configuration failed: %s', exc)
 else:
-    print("[TRANSLATOR_INIT] FAILED GEMINI_API_KEY not found in environment")
-    logger.warning("GEMINI_API_KEY not configured. Translation features will be disabled.")
-
-# Model configuration
-MODEL_NAME = "gemini-2.5-flash"  # Updated: gemini-2.0-flash no longer available, using latest 2.5-flash
-print(f"[TRANSLATOR_INIT] Using model: {MODEL_NAME}")
+    logger.warning('TRANSLATOR_INIT GEMINI_API_KEY not configured')
 
 
+# =========================
+# UTILITY HELPERS
+# =========================
 
-def validate_language(language: str) -> bool:
-    """
-    Validate if the language is supported.
-    
-    Args:
-        language: Language name or code
-        
-    Returns:
-        True if language is supported, False otherwise
-    """
-    if not language:
-        print("[TRANSLATOR] validate_language: Empty language provided")
+def clean_text(text: Optional[str]) -> str:
+    return text.strip() if isinstance(text, str) else ''
+
+
+def normalize_language_name(language: Optional[str]) -> str:
+    if not language or not isinstance(language, str):
+        return 'English'
+    # Clean and check against aliases first (supports 'hi' -> 'Hindi', etc.)
+    key = clean_text(language).lower()
+    return LANGUAGE_ALIASES.get(key, key.title())
+
+
+def is_supported_language(language: Optional[str]) -> bool:
+    return normalize_language_name(language).lower() in SUPPORTED_LANGUAGE_SET
+
+
+def ensure_us_english(text: str) -> str:
+    text = clean_text(text)
+    if not text:
+        return text
+    result = text
+    for british, american in BRITISH_TO_US_ENGLISH.items():
+        result = re.sub(rf'\b{re.escape(british)}\b', american, result, flags=re.IGNORECASE)
+    return result
+
+
+def contains_script(text: str, language: str) -> bool:
+    language = normalize_language_name(language)
+    if language in LANGUAGE_SCRIPT_PATTERNS:
+        return bool(LANGUAGE_SCRIPT_PATTERNS[language].search(text))
+    if language in {'Hindi', 'Marathi'}:
+        return bool(LANGUAGE_SCRIPT_PATTERNS['Devanagari'].search(text))
+    if language == 'Urdu':
+        return bool(LANGUAGE_SCRIPT_PATTERNS['Arabic'].search(text))
+    return False
+
+
+def contains_any_indic_script(text: str) -> bool:
+    return any(pattern.search(text) for pattern in LANGUAGE_SCRIPT_PATTERNS.values())
+
+
+def is_tanglish(text: str) -> bool:
+    text = clean_text(text).lower()
+    if not text or contains_any_indic_script(text):
         return False
-        
-    language_normalized = language.strip().lower()
-    is_valid = any(lang.strip().lower() == language_normalized for lang in SUPPORTED_LANGUAGES)
-    print(f"[TRANSLATOR] validate_language ('{language}') = {is_valid}")
-    return is_valid
-
-
-def translate_text(text: str, target_language: str) -> Tuple[bool, Optional[str], str]:
-    """
-    Translate text using Google Gemini API.
-    
-    Args:
-        text: Text to translate
-        target_language: Target language for translation
-        
-    Returns:
-        Tuple of (success: bool, translated_text: Optional[str], message: str)
-        - success: Whether translation was successful
-        - translated_text: The translated text if successful, None otherwise
-        - message: Status message or error description
-    """
-    print(f"\n[TRANSLATE_START] Text: '{text[:50]}...' Target: '{target_language}'")
-    
-    # Validate inputs
-    if not text or not isinstance(text, str):
-        msg = "Invalid text provided"
-        print(f"[TRANSLATE_FAIL] {msg}")
-        return False, None, msg
-    
-    if not target_language or not isinstance(target_language, str):
-        msg = "Invalid target language"
-        print(f"[TRANSLATE_FAIL] {msg}")
-        return False, None, msg
-    
-    text = text.strip()
-    if len(text) == 0:
-        msg = "Text cannot be empty"
-        print(f"[TRANSLATE_FAIL] {msg}")
-        return False, None, msg
-    
-    if len(text) > 5000:
-        msg = "Text too long (max 5000 characters)"
-        print(f"[TRANSLATE_FAIL] {msg}")
-        return False, None, msg
-    
-    print(f"[TRANSLATE] OK Input validation passed. Text length: {len(text)} chars")
-    
-    # Validate language
-    if not validate_language(target_language):
-        supported = ", ".join(SUPPORTED_LANGUAGES)
-        msg = f"Unsupported language. Supported: {supported}"
-        print(f"[TRANSLATE_FAIL] {msg}")
-        return False, None, msg
-    
-    print(f"[TRANSLATE] OK Language validation passed")
-    
-    # Check if text is already in target language (skip expensive API call if so)
-    target_lang_normalized = target_language.strip().lower()
-    
-    # Import language detection function
-    from .tamil_detector import contains_tamil_script
-    
-    # If English is target, check if input is already English
-    if target_lang_normalized == 'english':
-        if not contains_tamil_script(text):
-            # Input doesn't contain Tamil script, likely already English
-            msg = "No translation needed (already in English)"
-            print(f"[TRANSLATE_SUCCESS] {msg}")
-            return True, text, msg
-        # Input contains Tamil, needs translation to English
-    
-    # If Tamil is target, check if input is already Tamil
-    elif target_lang_normalized == 'tamil':
-        if contains_tamil_script(text):
-            # Input already contains Tamil script
-            msg = "No translation needed (already in Tamil)"
-            print(f"[TRANSLATE_SUCCESS] {msg}")
-            return True, text, msg
-        # Input is not Tamil, needs translation to Tamil
-    
-    if not API_KEY:
-        msg = "Translation service not configured"
-        print(f"[TRANSLATE_FAIL] {msg} - API_KEY is None")
-        logger.error(msg)
-        return False, None, msg
-    
-    print(f"[TRANSLATE] OK API_KEY present, proceeding with API call")
-    
-    try:
-        # Build translation prompt
-        prompt = f"""Translate the following text to {target_language}. 
-Only provide the translated text, nothing else. Do not add explanations or quotes.
-
-Text to translate: {text}"""
-        
-        print(f"[TRANSLATE_API] Building prompt for model '{MODEL_NAME}'")
-        print(f"[TRANSLATE_API] Target language: {target_language}")
-        print(f"[TRANSLATE_API] Calling genai.GenerativeModel()")
-        
-        # Call Gemini API (using deprecated google.generativeai for compatibility)
-        model = genai.GenerativeModel(MODEL_NAME)
-        print(f"[TRANSLATE_API] OK Model instance created")
-        
-        print(f"[TRANSLATE_API] Calling model.generate_content() with prompt")
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=1000,
-            ),
-        )
-        print(f"[TRANSLATE_API] OK API call completed")
-        
-        # Debug response object
-        print(f"[TRANSLATE_API] Response object type: {type(response)}")
-        
-        if response:
-            print(f"[TRANSLATE_API] OK Response is not None")
-            
-            # Try multiple ways to get text from response
-            translated = None
-            if hasattr(response, 'text'):
-                translated = response.text
-                try:
-                    print(f"[TRANSLATE_API] Got text via response.text: '{translated[:100] if translated else None}'")
-                except UnicodeEncodeError:
-                    print(f"[TRANSLATE_API] Got text via response.text (length: {len(translated)} chars)")
-            elif hasattr(response, 'candidates') and response.candidates:
-                content = response.candidates[0].content
-                translated = content.parts[0].text if content.parts else None
-                try:
-                    print(f"[TRANSLATE_API] Got text via candidates: '{translated[:100] if translated else None}'")
-                except UnicodeEncodeError:
-                    print(f"[TRANSLATE_API] Got text via candidates (length: {len(translated)} chars)")
-            else:
-                print(f"[TRANSLATE_API] Could not extract text from response")
-            
-            if translated:
-                translated = translated.strip()
-                
-                # Validate translation
-                if not translated or len(translated) == 0:
-                    msg = "Empty translation received"
-                    print(f"[TRANSLATE_FAIL] {msg}")
-                    return False, None, msg
-                
-                print(f"[TRANSLATE_SUCCESS] OK Translation successful")
-                try:
-                    print(f"[TRANSLATE_SUCCESS] Original ({len(text)} chars): '{text[:50]}'")
-                    print(f"[TRANSLATE_SUCCESS] Translated ({len(translated)} chars): '{translated[:50]}'")
-                except UnicodeEncodeError:
-                    print(f"[TRANSLATE_SUCCESS] Original ({len(text)} chars), Translated ({len(translated)} chars)")
-                logger.info(f"OK Translation successful: {target_language}")
-                return True, translated, "Translation successful"
-            else:
-                msg = "Could not extract text from response"
-                print(f"[TRANSLATE_FAIL] {msg}")
-                return False, None, msg
-        else:
-            msg = "No response from translation service"
-            print(f"[TRANSLATE_FAIL] {msg}")
-            return False, None, msg
-            
-    except Exception as e:
-        print(f"[TRANSLATE_EXCEPTION] Exception occurred during translation")
-        print(f"[TRANSLATE_EXCEPTION] Exception type: {type(e).__name__}")
-        print(f"[TRANSLATE_EXCEPTION] Exception message: {str(e)}")
-        print(f"[TRANSLATE_EXCEPTION] Full traceback:")
-        print(traceback.format_exc())
-        
-        error_msg = str(e)
-        logger.error(f"Translation error: {error_msg}")
-        
-        # Provide helpful error messages
-        if "API key" in error_msg:
-            return False, None, "API key configuration error"
-        elif "rate limit" in error_msg.lower():
-            return False, None, "Rate limit exceeded. Please try again later."
-        elif "network" in error_msg.lower():
-            return False, None, "Network error. Please check your connection."
-        else:
-            return False, None, f"Translation failed: {error_msg[:100]}"
-
-
-def get_display_message(original_text: str, translated_text: Optional[str], target_language: str) -> str:
-    """
-    Get the message to display based on original and translated content.
-    
-    Args:
-        original_text: Original message content
-        translated_text: Translated message content (if available)
-        target_language: Target language
-        
-    Returns:
-        The appropriate text to display
-    """
-    target_lang_normalized = target_language.strip().lower()
-    
-    # If already in English or no translation available
-    if target_lang_normalized == 'english' or not translated_text:
-        return original_text
-    
-    # Return translated text if available and different
-    if translated_text and translated_text != original_text:
-        return translated_text
-    
-    # Fallback to original
-    return original_text
-
-
-def get_translation_cache_key(message_id: int, target_language: str) -> str:
-    """
-    Generate a cache key for translated message.
-    Can be used for Redis caching if needed in the future.
-    
-    Args:
-        message_id: Message ID
-        target_language: Target language
-        
-    Returns:
-        Cache key string
-    """
-    return f"msg_translation_{message_id}_{target_language.lower()}"
+    score = sum(len(re.findall(pattern, text)) for pattern in TANGLISH_PATTERNS)
+    return score >= 2
 
 
 def detect_language(text: str) -> str:
-    """
-    Detect if text is in Tamil, Tanglish, or English.
-    
-    Args:
-        text: Text to analyze
-        
-    Returns:
-        Language type: 'tamil', 'tanglish', or 'english'
-    """
-    if not text or not isinstance(text, str):
-        return 'english'
-    
-    text = text.strip()
-    
-    # Tamil Unicode range: U+0B80 to U+0BFF
-    tamil_pattern = re.compile(r'[\u0B80-\u0BFF]')
-    tamil_char_count = len(tamil_pattern.findall(text))
-    
-    # Check if text contains significant Tamil characters
-    if tamil_char_count > len(text) * 0.3:  # More than 30% Tamil characters
-        return 'tamil'
-    
-    # Tanglish patterns: common Tamil words written in English
-    # Extended comprehensive list of Tamil words in English
-    tanglish_patterns = [
-        # Common Tamil greetings and expressions
-        r'\b(vanakkam|namaskar|namaste|ayyo|aiyyo|dei|bro|ra|la|da|ma|machi|machan|kitchdi)\b',
-        r'\b(nee|neenga|neeyum|neeya|naan|nanu|adhu|idhu|atha|idha|athaan|dhaan)\b',
-        r'\b(enna|enada|enadi|enadhu|epdi|epda|yeppadi|yaaru|yaari)\b',
-        r'\b(sari|sarie|saru|sare|sariyama|ok|okayy|okay|hmm|hm|uh|da|daa|pa|paa)\b',
-        r'\b(konjam|kondu|kupdu|koorum|koodei)\b',
-        r'\b(vera|verai|vendam|venda|vendaa|neeya|nei|neii|enaku|enakku|enalum)\b',
-        r'\b(vandha|vandhu|vandhuta|irundha|irukanu|irukkanu|irruku|irukka)\b',
-        r'\b(panna|pannadhu|pannicci|pannitu|pannitaan|pannaan|sonnaan|sonnaan)\b',
-        r'\b(solra|solren|solren|sollran|sollran|vituta|viduta|vidutam)\b',
-        r'\b(oru|rendo|moonru|naalu|aidu|aaru|yelu|ettu|tombai|patthu)\b',
-        r'\b(aandavan|devi|shiva|krishna|rama|ganesha)\b',
-        # Common Tanglish slang
-        r'\b(da|daa|di|di|yaar|super|vera|item|level|scene|mass|cool)\b',
-    ]
-    
-    text_lower = text.lower()
-    tanglish_score = 0
-    word_tokens = text_lower.split()
-    
-    # Check each word against Tanglish patterns
-    for pattern in tanglish_patterns:
-        matches = re.findall(pattern, text_lower)
-        tanglish_score += len(matches)
-    
-    # If we have substantial Tanglish word matches and no/minimal Tamil script, it's Tanglish
-    if tanglish_score >= 2 and tamil_char_count == 0:
-        return 'tanglish'
-    
-    # If only one Tanglish word but it's in context (not just random English)
-    if tanglish_score >= 1 and len(word_tokens) <= 10 and tamil_char_count == 0:
-        # Check if it's really Tanglish or just English with a Tamil word
-        english_word_count = 0
-        for word in word_tokens:
-            if word.lower() in ['how', 'are', 'you', 'i', 'me', 'is', 'am', 'the', 'a', 'an', 
-                                'what', 'when', 'where', 'why', 'which', 'who', 'can', 'do', 'will',
-                                'would', 'should', 'could', 'is', 'be', 'been', 'have', 'has']:
-                english_word_count += 1
-        
-        # If mostly Tamil words with some English, it's Tanglish
-        if english_word_count < len(word_tokens) * 0.7 and tanglish_score > 0:
-            return 'tanglish'
-    
-    # Otherwise, treat as English
-    return 'english'
+    text = clean_text(text)
+    if not text:
+        return 'English'
+    if contains_script(text, 'Tamil'):
+        return 'Tamil'
+    if contains_script(text, 'Malayalam'):
+        return 'Malayalam'
+    if contains_script(text, 'Kannada'):
+        return 'Kannada'
+    if contains_script(text, 'Telugu'):
+        return 'Telugu'
+    if contains_script(text, 'Bengali'):
+        return 'Bengali'
+    if contains_script(text, 'Gujarati'):
+        return 'Gujarati'
+    if contains_script(text, 'Urdu'):
+        return 'Urdu'
+    if contains_script(text, 'Hindi'):
+        lower_text = text.lower()
+        for language, keywords in DEVANAGARI_KEYWORDS.items():
+            if any(re.search(rf'\b{re.escape(word)}\b', lower_text) for word in keywords):
+                return language
+        return 'Hindi'
+    if is_tanglish(text):
+        return 'Tanglish'
+    return 'English'
 
 
-def normalize_to_professional_english(text: str, user_language: str = 'English') -> Tuple[bool, str, str]:
-    """
-    Normalize user input to professional English.
-    Handles Tamil, Tanglish, and casual English inputs.
-    
-    Args:
-        text: User input text
-        user_language: User's preferred language (for context)
-        
-    Returns:
-        Tuple of (success, normalized_text, message)
-    """
-    print(f"\n[NORMALIZE_START] Input: '{text[:50]}...' User language: '{user_language}'")
-    
-    if not text or not isinstance(text, str):
-        msg = "Invalid text provided"
-        print(f"[NORMALIZE_FAIL] {msg}")
-        return False, text, msg
-    
-    text = text.strip()
-    if len(text) == 0:
-        msg = "Text cannot be empty"
-        print(f"[NORMALIZE_FAIL] {msg}")
-        return False, text, msg
-    
-    if len(text) > 5000:
-        msg = "Text too long (max 5000 characters)"
-        print(f"[NORMALIZE_FAIL] {msg}")
-        return False, text, msg
-    
-    detected_lang = detect_language(text)
-    print(f"[NORMALIZE] Detected language: {detected_lang}")
-    
+def validate_language(language: Optional[str]) -> bool:
+    if not language or not isinstance(language, str):
+        return False
+    # Expanded validation to use internal code mapping as well
+    norm = normalize_language_name(language)
+    if norm in LANGUAGE_CODES:
+        return True
+    return norm.lower() in SUPPORTED_LANGUAGE_SET
+
+
+def _source_language_for_translation(source_language: Optional[str], text: str) -> Optional[str]:
+    # Updated to handle 'auto' detection explicitly
+    if source_language and source_language != 'auto':
+        normalized = normalize_language_name(source_language)
+        return 'Tamil' if normalized == 'Tanglish' else normalized
+    detected = detect_language(text)
+    return 'Tamil' if detected == 'Tanglish' else (detected if detected != 'English' else None)
+
+
+def _is_already_in_target(text: str, source_language: Optional[str], target_language: str) -> bool:
+    target = normalize_language_name(target_language)
+    source = _source_language_for_translation(source_language, text)
+    if not source or source != target:
+        return False
+    if target == 'English':
+        return not contains_any_indic_script(text)
+    if target in {'Hindi', 'Marathi'}:
+        return contains_script(text, 'Hindi')
+    return contains_script(text, target)
+
+
+# =========================
+# TRANSLATION
+# =========================
+
+def translate_text(
+    text: str,
+    target_language: str,
+    source_language: Optional[str] = None,
+) -> Tuple[bool, Optional[str], str]:
+    text = clean_text(text)
+    target_language = normalize_language_name(target_language)
+    source_language = _source_language_for_translation(source_language, text)
+
+    logger.info('TRANSLATE_START target=%s source=%s text=%s', target_language, source_language or 'auto', text[:120])
+
+    if not text:
+        return False, None, 'Empty text provided'
+
+    if target_language not in LANGUAGE_CODES and not validate_language(target_language):
+        return False, None, f'Unsupported language: {target_language}'
+
+    if source_language and source_language != 'auto' and source_language not in LANGUAGE_CODES and not validate_language(source_language):
+        return False, None, f'Unsupported source language: {source_language}'
+
+    if _is_already_in_target(text, source_language, target_language):
+        msg = f'Already in {target_language}'
+        logger.info('TRANSLATE_SKIP %s', msg)
+        return True, text, msg
+
+    # TRANSLATION CACHE: Check cache first
+    cache_key = f'translation_{hash(text)}_{source_language or "auto"}_{target_language}'
+    cached_result = cache.get(cache_key)
+    if cached_result:
+        logger.info('TRANSLATE_CACHE_HIT key=%s', cache_key)
+        return cached_result
+
+    if not API_KEY:
+        logger.error('TRANSLATE_FAIL translation service not configured')
+        return False, None, 'Translation service not configured'
+
+    if source_language:
+        prompt = (
+            f'Translate the following text from {source_language} to {target_language}.\n'
+            'Only return the translated text. Do not include explanations or extra text.\n\n'
+            f'Text:\n{text}'
+        )
+    else:
+        prompt = (
+            f'Translate the following text to {target_language}.\n'
+            'Only return the translated text. Do not include explanations or extra text.\n\n'
+            f'Text:\n{text}'
+        )
+
+    logger.info('TRANSLATE_PROMPT source=%s target=%s', source_language or 'auto', target_language)
+
     try:
-        if detected_lang == 'tamil':
-            msg = "Tamil text detected - translating to professional English"
-            print(f"[NORMALIZE] {msg}")
-            success, normalized, trans_msg = translate_text(text, 'English')
-            if success and normalized:
-                print(f"[NORMALIZE_SUCCESS] Tamil → Professional English")
-                return True, normalized, "Normalized from Tamil"
-            else:
-                print(f"[NORMALIZE_FALLBACK] Translation failed, using original text")
-                return False, text, "Translation failed, using original"
-        
-        elif detected_lang == 'tanglish':
-            msg = "Tanglish text detected - translating to professional English"
-            print(f"[NORMALIZE] {msg}")
-            success, normalized, trans_msg = translate_text(text, 'English')
-            if success and normalized:
-                print(f"[NORMALIZE_SUCCESS] Tanglish → Professional English")
-                return True, normalized, "Normalized from Tanglish"
-            else:
-                print(f"[NORMALIZE_FALLBACK] Translation failed, using original text")
-                return False, text, "Translation failed, using original"
-        
-        else:  # English
-            print(f"[NORMALIZE] English text - normalizing to professional format")
-            # Normalize casual English to professional English
-            success, normalized, norm_msg = normalize_english_text(text)
-            if success:
-                print(f"[NORMALIZE_SUCCESS] English normalized to professional format")
-                return True, normalized, norm_msg
-            else:
-                print(f"[NORMALIZE_FALLBACK] Normalization processing complete")
-                return True, normalized, norm_msg
-    
-    except Exception as e:
-        print(f"[NORMALIZE_EXCEPTION] Error during normalization: {str(e)}")
-        logger.error(f"Normalization error: {str(e)}")
-        return False, text, f"Normalization error: {str(e)}"
+        model = genai.GenerativeModel(MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=1000),
+        )
 
+        translated = None
+        if hasattr(response, 'text') and response.text:
+            translated = response.text.strip()
+        elif hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            translated = getattr(candidate, 'content', None)
+            if translated and hasattr(translated, 'parts') and translated.parts:
+                translated = translated.parts[0].text.strip()
+            elif isinstance(translated, str):
+                translated = translated.strip()
+
+        if not translated:
+            logger.warning('TRANSLATE_FAIL empty response from Gemini')
+            # Safe fallback: return original text if translation returns empty
+            return True, text, 'Empty translation from service - returning original'
+
+        logger.info('TRANSLATE_SUCCESS target=%s length=%d', target_language, len(translated))
+        
+        # CACHE SUCCESSFUL TRANSLATION
+        result = (True, translated, 'Translation successful')
+        cache.set(cache_key, result, 3600)  # Cache for 1 hour
+        return result
+
+    except Exception as exc:
+        logger.error('TRANSLATE_EXCEPTION %s', traceback.format_exc())
+        message = str(exc)
+        if 'api key' in message.lower():
+            error_result = (False, None, 'API key configuration error')
+        elif 'rate limit' in message.lower():
+            error_result = (False, None, 'Rate limit exceeded. Please try again later.')
+        elif 'network' in message.lower():
+            error_result = (False, None, 'Network error. Please check your connection.')
+        else:
+            error_result = (False, None, f'Translation failed: {message[:200]}')
+        
+        # Safe fallback: Return original text as fallback on exception instead of crashing
+        logger.warning(f'TRANSLATE_EXCEPTION using fallback - returning original text. Error: {message[:100]}')
+        return True, text, f'Translation exception: {message[:100]} - returned original'
+
+
+# =========================
+# NORMALIZATION
+# =========================
 
 def normalize_english_text(text: str) -> Tuple[bool, str, str]:
-    """
-    Normalize casual/slang English to professional English.
-    
-    Args:
-        text: English text to normalize
-        
-    Returns:
-        Tuple of (success, normalized_text, message)
-    """
-    if not text or not isinstance(text, str):
-        return False, text, "Invalid input"
-    
-    normalized = text.strip()
-    
-    # Common slang/casual expressions to professional mapping
-    casual_to_professional = {
+    text = clean_text(text)
+    if not text:
+        return False, text, 'Invalid English text'
+
+    replacements = {
         r'\bu\b': 'you',
         r'\br\b': 'are',
         r'\bpls\b': 'please',
-        r'\bty\b': 'thank you',
-        r'\bthnx\b': 'thanks',
-        r'\bk\b': 'okay',
-        r'\btb\b': 'to be',
-        r'\bgr8\b': 'great',
-        r'\bhey\s+guys': 'hello everyone',
-        r'\bthnx\s+m8': 'thank you friend',
-        r'\bc\u0027mon': 'come on',
-        r'\bwanna\b': 'want to',
+        r'\bthx\b': 'thanks',
         r'\bgonna\b': 'going to',
-        r'\bgotta\b': 'got to',
-        r'\bkinda\b': 'kind of',
-        r'\bsorta\b': 'sort of',
+        r'\bwanna\b': 'want to',
         r'\bcuz\b': 'because',
-        r'\bfyi\b': 'for your information',
-        r'\blol\b': '',  # Remove LOL
-        r'\bhaha\b': '',  # Remove casual laughs
-        r'\bhehe\b': '',  # Remove casual laughs
+        r'\blol\b': '',
+        r'\bhaha\b': '',
+        r'\btho\b': 'though',
+        r'\bya\b': 'you',
     }
-    
-    # Apply substitutions (case-insensitive)
-    for casual_pattern, professional in casual_to_professional.items():
-        normalized = re.sub(casual_pattern, professional, normalized, flags=re.IGNORECASE)
-    
-    # Fix multiple spaces
+
+    normalized = text
+    for pattern, replacement in replacements.items():
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
     normalized = re.sub(r'\s+', ' ', normalized).strip()
-    
-    # Capitalize first letter of sentences
-    sentences = normalized.split('. ')
-    capitalized = '. '.join([s.capitalize() if s else s for s in sentences])
-    
-    return True, capitalized, "Normalized to professional English"
+    sentences = re.split(r'([.!?]\s*)', normalized)
+    normalized = ''.join(part.capitalize() if i % 2 == 0 else part for i, part in enumerate(sentences))
+    normalized = ensure_us_english(normalized)
+    return True, normalized, 'Normalized English text'
 
 
-def get_message_for_sender(content: str, normalized_content: str, user_language: str) -> Tuple[str, str]:
-    """
-    Get the message to display for the sender.
-    If user's language is Tamil and content is in English, translate it.
-    
-    Args:
-        content: Original message content (in professional English)
-        normalized_content: Normalized content (from storage)
-        user_language: User's preferred language
-        
-    Returns:
-        Tuple of (display_content, translation_source)
-    """
-    print(f"\n[GET_MESSAGE_SENDER] Language: {user_language}")
-    
-    display_content = content or normalized_content
-    
-    user_lang_normalized = user_language.strip().lower()
-    
-    # If sender's language is Tamil, show Tamil translation
-    if user_lang_normalized == 'tamil':
-        success, translated, msg = translate_text(content, 'Tamil')
-        if success and translated:
-            print(f"[GET_MESSAGE_SENDER] SUCCESS - Translated to Tamil for sender")
-            return translated, 'translated_for_sender'
-        else:
-            print(f"[GET_MESSAGE_SENDER] FALLBACK - Using original English")
-            return display_content, 'original'
-    
-    # English users see professional English
-    print(f"[GET_MESSAGE_SENDER] SUCCESS - Showing professional English")
-    return display_content, 'professional_english'
+def normalize_to_professional_english(
+    text: str,
+    source_language: Optional[str] = None,
+) -> Tuple[bool, str, str]:
+    text = clean_text(text)
+    if not text:
+        return False, text, 'Empty text provided'
+
+    normalized_source = normalize_language_name(source_language) if source_language else None
+    detected = detect_language(text)
+    if normalized_source == 'Tanglish':
+        normalized_source = 'Tamil'
+    if normalized_source and normalized_source != 'English':
+        detected = normalized_source
+
+    logger.info('NORMALIZE_START source=%s detected=%s text=%s', normalized_source or 'auto', detected, text[:120])
+
+    if detected == 'English':
+        return normalize_english_text(text)
+
+    source_for_translation = 'Tamil' if detected == 'Tanglish' else detected
+    success, translated, message = translate_text(
+        text,
+        'English',
+        source_language=source_for_translation,
+    )
+    if success and translated:
+        normalized = ensure_us_english(translated)
+        logger.info('NORMALIZE_SUCCESS source=%s', source_for_translation)
+        return True, normalized, f'Normalized from {source_for_translation}'
+
+    logger.warning('NORMALIZE_FAIL source=%s message=%s', source_for_translation, message)
+    return False, text, message
 
 
-def get_message_for_receiver(content: str, normalized_content: str) -> Tuple[str, str]:
-    """
-    Get the message to display for the receiver.
-    Always show professional English to ensure clarity.
-    
-    Args:
-        content: Original message content
-        normalized_content: Normalized professional English content
-        
-    Returns:
-        Tuple of (display_content, translation_source)
-    """
-    print(f"\n[GET_MESSAGE_RECEIVER] Preparing professional English for receiver")
-    
-    # Use normalized content if available, otherwise original
-    display_content = normalized_content if normalized_content else content
-    
-    print(f"[GET_MESSAGE_RECEIVER] SUCCESS - Using professional English")
-    return display_content, 'professional_english'
+def get_display_message(
+    original_text: str,
+    translated_text: Optional[str],
+    target_language: str,
+) -> str:
+    if normalize_language_name(target_language) == 'English':
+        return original_text
+    return translated_text or original_text
 
 
-def synthesize_speech_with_gtts(text: str, language_code: str = 'en') -> Tuple[bool, Optional[bytes], str]:
-    """
-    Synthesize speech from text using gTTS (Google Translate TTS - simple fallback).
-    For production, replace with Google Cloud Text-to-Speech API.
-    
-    Args:
-        text: Text to convert to speech
-        language_code: Language code ('en' for English, 'ta' for Tamil)
-        
-    Returns:
-        Tuple of (success, audio_bytes_mp3, message)
-    """
-    print(f"\n[GTTS_SYNTHESIZE] Text: '{text[:50]}...' Language: '{language_code}'")
-    
+def get_translation_cache_key(message_id: int, target_language: str) -> str:
+    return f'msg_translation_{message_id}_{normalize_language_name(target_language).lower()}'
+
+
+def synthesize_speech_with_gtts(
+    text: str,
+    language_code: str = 'en',
+) -> Tuple[bool, Optional[bytes], str]:
     if not text or not isinstance(text, str):
-        msg = "Invalid text for TTS"
-        print(f"[GTTS_FAIL] {msg}")
-        return False, None, msg
-    
-    text = text.strip()
-    if len(text) == 0:
-        msg = "Text cannot be empty"
-        print(f"[GTTS_FAIL] {msg}")
-        return False, None, msg
-    
+        return False, None, 'Invalid text for TTS'
+
     try:
-        # Try importing gTTS; if not installed, return fallback message
-        try:
-            from gtts import gTTS
-        except ImportError:
-            msg = "gTTS not installed. Install with: pip install gtts"
-            print(f"[GTTS_MISSING] {msg}")
-            return False, None, msg
-        
-        # Generate speech
-        tts = gTTS(text=text, lang=language_code, slow=False)
-        
-        # Save to bytes buffer
+        from gtts import gTTS
         import io
+
+        tts = gTTS(text=text, lang=language_code, slow=False)
         audio_buffer = io.BytesIO()
         tts.write_to_fp(audio_buffer)
         audio_buffer.seek(0)
-        audio_bytes = audio_buffer.getvalue()
-        
-        if audio_bytes and len(audio_bytes) > 0:
-            print(f"[GTTS_SUCCESS] Generated {len(audio_bytes)} bytes of audio")
-            return True, audio_bytes, "Speech synthesized successfully"
-        else:
-            msg = "Generated audio is empty"
-            print(f"[GTTS_FAIL] {msg}")
-            return False, None, msg
-            
-    except Exception as e:
-        msg = f"TTS synthesis error: {str(e)}"
-        print(f"[GTTS_EXCEPTION] {msg}")
-        logger.error(msg)
-        return False, None, msg
+        return True, audio_buffer.getvalue(), 'Speech synthesized successfully'
+    except Exception as exc:
+        logger.error('TTS error: %s', exc)
+        return False, None, str(exc)
+
+
+if __name__ == '__main__':
+    debug_samples = [
+        'நான் செய்கிறேன்',
+        'मैं ठीक हूँ',
+        'నేను బాగున్నాను',
+        'ഞാൻ സുഖമാണ്',
+        'ನಾನು ಚೆನ್ನಾಗಿದ್ದೇನೆ',
+        'আমি ভালো আছি',
+        'હું સારું છું',
+        'मी ठीक आहे',
+        'ਮੈਂ ਠੀਕ ਹਾਂ',
+        'میں ٹھیک ہوں',
+        'enna bro epdi iruka',
+        'Hello, how are you?',
+    ]
+    for sample in debug_samples:
+        detected = detect_language(sample)
+        print(f'INPUT: {sample}')
+        print(f'  detected: {detected}')
+        success, normalized, msg = normalize_to_professional_english(sample)
+        print(f'  normalized success={success} msg={msg} text={normalized}')
+        print('')

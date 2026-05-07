@@ -46,6 +46,11 @@
     .group-item { padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; }
     code { background: rgba(0,0,0,0.3); padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace; }
 
+    .status-badge { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; text-transform: uppercase; }
+    .status-active { background: rgba(76, 175, 80, 0.2); color: #81c784; border: 1px solid #4CAF50; }
+    .status-inactive { background: rgba(255, 152, 0, 0.2); color: #ffb74d; border: 1px solid #ff9800; }
+    .btn-toggle { background: #2196F3; color: white; }
+
     @media (min-width: 900px) { .dashboard-grid { grid-template-columns: 1.5fr 1fr; } }
 </style>
 
@@ -133,6 +138,105 @@
                 {% endfor %}
             </div>
         </div>
+
+        <!-- LANGUAGE MODE SECTION -->
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem;">
+                <h2>🌐 Language Mode</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <select id="language-select" class="btn" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(102, 126, 234, 0.3); outline: none;">
+                        <option value="" style="color: black;">-- Select --</option>
+                        <option value="Tamil" style="color: black;">Tamil</option>
+                        <option value="Hindi" style="color: black;">Hindi</option>
+                        <option value="Telugu" style="color: black;">Telugu</option>
+                        <option value="Malayalam" style="color: black;">Malayalam</option>
+                        <option value="Kannada" style="color: black;">Kannada</option>
+                        <option value="Bengali" style="color: black;">Bengali</option>
+                        <option value="Gujarati" style="color: black;">Gujarati</option>
+                        <option value="Marathi" style="color: black;">Marathi</option>
+                        <option value="Punjabi" style="color: black;">Punjabi</option>
+                        <option value="Urdu" style="color: black;">Urdu</option>
+                        <option value="English" style="color: black;">English</option>
+                    </select>
+                    <button class="btn btn-approve" onclick="addLanguage()">Add</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Language</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="language-table-body">
+                    {% for lang in languages %}
+                    <tr id="lang-row-{{ lang.id }}">
+                        <td><strong>{{ lang.name }}</strong></td>
+                        <td>
+                            <span id="lang-status-{{ lang.id }}" class="status-badge {% if lang.is_active %}status-active{% else %}status-inactive{% endif %}">
+                                {{ lang.is_active|yesno:"Enabled,Disabled" }}
+                            </span>
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button onclick="toggleLanguage('{{ lang.id }}')" class="btn btn-toggle">Toggle</button>
+                                <button onclick="deleteLanguage('{{ lang.id }}')" class="btn btn-delete">Remove</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-lang-row"><td colspan="3" style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.4);">No languages found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+
+<script>
+async function addLanguage() {
+    const select = document.getElementById('language-select');
+    const name = select.value;
+    if (!name) {
+        alert("Please select a language from the menu.");
+        return;
+    }
+    
+    const response = await fetch("{% url 'add_language' %}", {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name })
+    });
+    
+    const data = await response.json();
+    if (response.ok) {
+        location.reload();
+    } else {
+        alert(data.error || "Error adding language.");
+    }
+}
+
+async function toggleLanguage(id) {
+    const response = await fetch(`/dashboard/language/toggle/${id}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    });
+    const data = await response.json();
+    if (data.success) {
+        const badge = document.getElementById(`lang-status-${id}`);
+        badge.className = data.is_active ? 'status-badge status-active' : 'status-badge status-inactive';
+        badge.innerText = data.is_active ? 'Enabled' : 'Disabled';
+    }
+}
+
+async function deleteLanguage(id) {
+    if (!confirm('Are you sure you want to delete this language permanently?')) return;
+    const response = await fetch(`/dashboard/language/delete/${id}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    });
+    if (response.ok) document.getElementById(`lang-row-${id}`).remove();
+}
+</script>
 {% endblock %}

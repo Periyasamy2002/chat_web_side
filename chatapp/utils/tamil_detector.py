@@ -12,6 +12,10 @@ import re
 TAMIL_SCRIPT_START = 0x0B80
 TAMIL_SCRIPT_END = 0x0BFF
 
+# Hindi (Devanagari) Unicode range
+HINDI_SCRIPT_START = 0x0900
+HINDI_SCRIPT_END = 0x097F
+
 # Common Tanglish patterns - Tamil words/phrases written in English
 TANGLISH_PATTERNS = [
     # Common Tamil greetings and responses
@@ -322,5 +326,39 @@ def ensure_tamil_only_display(text):
             result.append(char)
         # Everything else (English letters, digits, etc.) is skipped from display
         # This ensures ONLY Tamil characters show in Tamil mode
+    
+    return ''.join(result).strip()
+
+
+def ensure_hindi_only_display(text):
+    """
+    Ensure text is suitable for Hindi-only display.
+    Removes any non-Hindi script characters (English letters, numbers, etc).
+    Keeps: Hindi (Devanagari) script, spaces, and universal punctuation.
+    
+    Args:
+        text: Text to filter for Hindi-only display
+        
+    Returns:
+        Text with ONLY Hindi characters and safe punctuation/spaces
+    """
+    if not text:
+        return text
+    
+    result = []
+    for char in text:
+        char_code = ord(char)
+        
+        # Keep Hindi (Devanagari) script characters
+        if HINDI_SCRIPT_START <= char_code <= HINDI_SCRIPT_END:
+            result.append(char)
+        # Keep spaces and common universal punctuation
+        elif char in ' \t\n.,!?;:\'"()[]{}':
+            result.append(char)
+        # Keep common symbols
+        elif char in '@ - + = * / ~ ` | \\ < >':
+            result.append(char)
+        # Everything else (English letters, digits, etc.) is skipped from display
+        # This ensures ONLY Hindi characters show in Hindi mode
     
     return ''.join(result).strip()

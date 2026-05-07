@@ -554,10 +554,30 @@
         <div class="header-info">
             <span>{{ user_name }}</span>
             <span class="online-count">{{ online_count }} Online</span>
-            {% if language_mode == 'tamil' %}
-                <span style="color: #ff9800; font-weight: 600;">🇹🇳 Tamil Mode</span>
+            {% if language_name == 'Tamil' %}
+                <span style="color: #ff9800; font-weight: 600;">🇮🇳 {{ language_name }} Mode</span>
+            {% elif language_name == 'English' %}
+                <span style="color: #667eea; font-weight: 600;">🌐 {{ language_name }} Mode</span>
+            {% elif language_name == 'Hindi' %}
+                <span style="color: #f39c12; font-weight: 600;">🇮🇳 {{ language_name }} Mode</span>
+            {% elif language_name == 'Telugu' %}
+                <span style="color: #e74c3c; font-weight: 600;">🔤 {{ language_name }} Mode</span>
+            {% elif language_name == 'Malayalam' %}
+                <span style="color: #16a085; font-weight: 600;">🏠 {{ language_name }} Mode</span>
+            {% elif language_name == 'Kannada' %}
+                <span style="color: #8e44ad; font-weight: 600;">💬 {{ language_name }} Mode</span>
+            {% elif language_name == 'Bengali' %}
+                <span style="color: #c0392b; font-weight: 600;">🏛️ {{ language_name }} Mode</span>
+            {% elif language_name == 'Gujarati' %}
+                <span style="color: #d35400; font-weight: 600;">📍 {{ language_name }} Mode</span>
+            {% elif language_name == 'Marathi' %}
+                <span style="color: #2980b9; font-weight: 600;">🎭 {{ language_name }} Mode</span>
+            {% elif language_name == 'Punjabi' %}
+                <span style="color: #c1440c; font-weight: 600;">🎪 {{ language_name }} Mode</span>
+            {% elif language_name == 'Urdu' %}
+                <span style="color: #27ae60; font-weight: 600;">📜 {{ language_name }} Mode</span>
             {% else %}
-                <span style="color: #667eea; font-weight: 600;">🔤 English Mode</span>
+                <span style="color: #3498db; font-weight: 600;">🌍 {{ language_name }} Mode</span>
             {% endif %}
         </div>
     </div>
@@ -579,19 +599,13 @@
                                     {% if msg.is_deleted == 'deleted_for_all' %}
                                         <em>This message was deleted</em>
                                     {% else %}
-                                        {% if language_mode == 'tamil' %}
-                                            {{ msg.tamil_content }}
-                                        {% else %}
-                                            {{ msg.english_content }}
-                                        {% endif %}
+                                        {# Display content is pre-filtered by view based on language mode #}
+                                        {{ msg.display_content|default:msg.content }}
                                     {% endif %}
                                 </div>
                                 {% if msg.is_deleted != 'deleted_for_all' %}
-                                    {% if language_mode == 'tamil' %}
-                                        <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.tamil_content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
-                                    {% else %}
-                                        <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.english_content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
-                                    {% endif %}
+                                    {# Use original content for translation #}
+                                    <button class="translate-btn" onclick="translateMessage(event, {{ msg.id }}, '{{ msg.original_content|escapejs }}', this)" title="Translate message">🌐 Translate</button>
                                     <div class="message-translated" id="translated-{{ msg.id }}" style="display: none;"></div>
                                 {% endif %}
                             
@@ -607,10 +621,15 @@
                                         {% if msg.duration %}{{ msg.duration|floatformat:0 }}s{% else %}0s{% endif %}
                                     </div>
                                     <audio style="display: none;">
-                                        {% if language_mode == 'tamil' %}
-                                            <source src="{% if msg.audio_file_tamil %}{{ msg.audio_file_tamil.url }}{% elif msg.audio_file %}{{ msg.audio_file.url }}{% endif %}" type="{{ msg.audio_mime_type }}">
-                                        {% else %}
-                                            <source src="{% if msg.audio_file_english %}{{ msg.audio_file_english.url }}{% elif msg.audio_file %}{{ msg.audio_file.url }}{% endif %}" type="{{ msg.audio_mime_type }}">
+                                        {# For Tamil mode, try language-specific audio files #}
+                                        {% if language_mode == 'tamil' and msg.audio_file_tamil %}
+                                            <source src="{{ msg.audio_file_tamil.url }}" type="{{ msg.audio_mime_type }}">
+                                        {# For English mode, try language-specific audio files #}
+                                        {% elif language_mode == 'english' and msg.audio_file_english %}
+                                            <source src="{{ msg.audio_file_english.url }}" type="{{ msg.audio_mime_type }}">
+                                        {# For all other languages or fallback #}
+                                        {% elif msg.audio_file %}
+                                            <source src="{{ msg.audio_file.url }}" type="{{ msg.audio_mime_type }}">
                                         {% endif %}
                                     </audio>
                                 </div>
@@ -723,33 +742,39 @@
         const inputError = document.getElementById('inputError');
         const sendBtn = document.getElementById('sendBtn');
 
-        if (userLanguageMode === 'tamil') {
-            messageInput.placeholder = 'செய்தி எழுதவும்...';
-        }
+        // Set placeholder text based on language mode
+        const placeholderMap = {
+            'tamil': 'செய்தி எழுதவும்...',           // Tamil
+            'hindi': 'संदेश टाइप करें...',              // Hindi
+            'telugu': 'సందేశం టైప్ చేయండి...',        // Telugu
+            'malayalam': 'സന്ദേശം ടൈപ്പ് ചെയ്യുക...',  // Malayalam
+            'kannada': 'ಸಂದೇಶ ಟೈಪ್ ಮಾಡಿ...',           // Kannada
+            'bengali': 'বার্তা টাইপ করুন...',           // Bengali
+            'gujarati': 'સંદેશ લખો...',               // Gujarati
+            'marathi': 'संदेश टाइप करा...',            // Marathi
+            'punjabi': 'ਸੁਨੇਹਾ ਲਿਖੋ...',               // Punjabi
+            'urdu': 'پیغام ٹائپ کریں...',              // Urdu
+        };
+        
+        const placeholder = placeholderMap[userLanguageMode] || 'Type a message...';
+        messageInput.placeholder = placeholder;
 
-        // Tamil mode input handling
-        if (userLanguageMode === 'tamil') {
-            messageInput.addEventListener('input', function(e) {
-                if (!this.value.trim()) {
-                    inputError.style.display = 'none';
-                    return;
-                }
-                inputError.style.display = 'none';
-            });
-        } else {
-            // English mode validation
-            messageInput.addEventListener('input', function(e) {
-                const inputValue = this.value;
-                
-                // Check for Tamil script characters
+        // Input validation based on language mode
+        messageInput.addEventListener('input', function(e) {
+            const inputValue = this.value;
+            
+            // ENGLISH MODE: Restrict to ASCII only (no non-English scripts)
+            if (userLanguageMode === 'english') {
+                // Check for non-ASCII characters (Tamil, Hindi, Telugu, etc.)
                 if (/[^\x00-\x7F]/.test(inputValue)) {
                     const cleanedValue = inputValue.replace(/[^\x00-\x7F]/g, '');
                     this.value = cleanedValue;
-                    inputError.textContent = '❌ Tamil characters not allowed';
+                    inputError.textContent = '❌ English only - non-English characters not allowed';
                     inputError.style.display = 'block';
+                    return;
                 } 
                 // Check for Tanglish patterns
-                else if (containsTanglish(inputValue)) {
+                if (containsTanglish(inputValue)) {
                     const foundPatterns = [];
                     TANGLISH_PATTERNS.forEach(pattern => {
                         const match = inputValue.match(pattern);
@@ -760,12 +785,21 @@
                     const patternList = [...new Set(foundPatterns)].slice(0, 3).join(', ');
                     inputError.textContent = `❌ Tanglish not allowed (detected: ${patternList})`;
                     inputError.style.display = 'block';
-                } 
-                else {
-                    inputError.style.display = 'none';
+                    return;
                 }
-            });
-        }
+                inputError.style.display = 'none';
+            } 
+            // TAMIL MODE: Allow Tamil script
+            else if (userLanguageMode === 'tamil') {
+                // Tamil allows any input including Tamil script
+                inputError.style.display = 'none';
+            } 
+            // OTHER LANGUAGES (Hindi, Telugu, Malayalam, Kannada, Bengali, Gujarati, Marathi, Punjabi, Urdu, etc.)
+            // Allow all input in their native scripts
+            else {
+                inputError.style.display = 'none';
+            }
+        });
 
         sendBtn.addEventListener('click', function() {
             const messageContent = messageInput.value.trim();
@@ -876,7 +910,25 @@
         btn.disabled = true;
         btn.textContent = '⏳ Translating...';
         
-        const targetLang = userLanguageMode === 'tamil' ? 'English' : 'Tamil';
+        // Determine target language for translation
+        let targetLang = 'English'; // Default
+        
+        // Smart language selection for translation
+        const langTranslationMap = {
+            'tamil': 'English',
+            'english': 'Tamil',
+            'hindi': 'English',
+            'telugu': 'English',
+            'malayalam': 'English',
+            'kannada': 'English',
+            'bengali': 'English',
+            'gujarati': 'English',
+            'marathi': 'English',
+            'punjabi': 'English',
+            'urdu': 'English',
+        };
+        
+        targetLang = langTranslationMap[userLanguageMode] || 'English';
         
         fetch(`/group/${groupCode}/translate/`, {
             method: 'POST',

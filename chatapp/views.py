@@ -1,19 +1,22 @@
 from django.shortcuts import render, redirect, get_object_or_404
 
 from chatproject import settings
-from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES, UserProfile
-from django.http import JsonResponse
+from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES, UserProfile, Language
+from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
 from datetime import timedelta
 import uuid
 import logging
 from django.contrib import messages
+import json
 import io
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.models import User
 from .utils.translator import translate_text, normalize_to_professional_english, synthesize_speech_with_gtts
-from .utils.tamil_detector import is_valid_english_only, get_language_violation_details, contains_tamil_script, ensure_english_only_display, ensure_tamil_only_display, TAMIL_SCRIPT_START, TAMIL_SCRIPT_END, contains_tanglish
+from .utils.language import process_message_content, SUPPORTED_LANGUAGES
+from .utils.tamil_detector import is_valid_english_only, get_language_violation_details, contains_tamil_script, ensure_english_only_display, ensure_tamil_only_display, ensure_hindi_only_display, TAMIL_SCRIPT_START, TAMIL_SCRIPT_END, contains_tanglish
 
 logger = logging.getLogger(__name__)
 import os
@@ -31,6 +34,13 @@ import google.generativeai as genai
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Constants
+def ensure_session(request):
+    """Ensure session key exists, create if None."""
+    if not request.session.session_key:
+        request.session.create()
+    return request.session.session_key
+
+
 BRITISH_TO_US_ENGLISH = {
     'colour': 'color', 'Colour': 'Color', 'favour': 'favor', 'Favour': 'Favor',
     'honour': 'honor', 'Honour': 'Honor', 'labour': 'labor', 'Labour': 'Labor',
@@ -109,20 +119,45 @@ def auto_offline_inactive_users():
 
 def get_language_mode(request, session_id):
     """Get language mode from session or database, with fallback."""
-    mode = request.session.get('language_mode', 'english').strip().lower()
+    mode = request.session.get('language_mode', 'english').lower()
     
-    if not mode or mode == 'english':
-        try:
-            anon_user = AnonymousUser.objects.filter(session_id=session_id).first()
-            if anon_user and anon_user.language_mode and anon_user.language_mode != 'english':
-                mode = anon_user.language_mode.lower()
-        except Exception:
-            pass
+    # Get from database if exists
+    anon_user = AnonymousUser.objects.filter(session_id=session_id).first()
+    if anon_user and anon_user.language_mode:
+        mode = anon_user.language_mode.lower()
     
-    return mode if mode in ['english', 'tamil'] else 'english'
+    # Normalize short codes and full names to the same format
+    # Support both: 'ta'/'tamil', 'hi'/'hindi', 'en'/'english'
+    mode_map = {
+        'ta': 'tamil',
+        'tamil': 'tamil',
+        'hi': 'hindi',
+        'hindi': 'hindi',
+        'te': 'telugu',
+        'telugu': 'telugu',
+        'ml': 'malayalam',
+        'malayalam': 'malayalam',
+        'kn': 'kannada',
+        'kannada': 'kannada',
+        'bn': 'bengali',
+        'bengali': 'bengali',
+        'gu': 'gujarati',
+        'gujarati': 'gujarati',
+        'mr': 'marathi',
+        'marathi': 'marathi',
+        'pa': 'punjabi',
+        'punjabi': 'punjabi',
+        'ur': 'urdu',
+        'urdu': 'urdu',
+        'en': 'english',
+        'english': 'english'
+    }
+    
+    # Return normalized mode name
+    return mode_map.get(mode, 'english')
 
 
-def process_english_mode_message(content):
+def process_english_mode_gn(content):
     """
     Process message in English mode: STRICT ENGLISH ONLY.
 
@@ -315,7 +350,7 @@ def register_view(request):
                     profile.mobile_number = mobile
                     profile.save()
                 
-                logger.info(f"[REGISTER] ✅ User '{user.username}' registered. Profile created: {created}, approved: {profile.is_approved}")
+                logger.info(f"[REGISTER] [SUCCESS] User '{user.username}' registered. Profile created: {created}, approved: {profile.is_approved}")
                 messages.success(request, "✅ Registration successful! Awaiting Admin approval.")
                 return redirect("login")
             except Exception as e:
@@ -372,7 +407,7 @@ def login_view(request):
         
         # Check if admin/superuser
         if user.is_superuser:
-            logger.info(f"[LOGIN] ✅ Admin user '{user.username}' logging in - accessing /admin/")
+            logger.info(f"[LOGIN] [SUCCESS] Admin user '{user.username}' logging in - accessing /admin/")
             
             # Ensure session exists
             if not request.session.session_key:
@@ -404,7 +439,7 @@ def login_view(request):
             })
         
         # ✅ User approved - login
-        logger.info(f"[LOGIN] ✅ Regular user '{user.username}' approved - logging in")
+        logger.info(f"[LOGIN] [SUCCESS] Regular user '{user.username}' approved - logging in")
         
         if not request.session.session_key:
             request.session.create()
@@ -438,11 +473,59 @@ def dashboard(request):
     pending_users = UserProfile.objects.filter(is_approved=False)
     approved_users = UserProfile.objects.filter(is_approved=True).exclude(user__is_superuser=True)
     all_groups = Group.objects.all()
+    all_languages = Language.objects.all().order_by('name')
+    
     return render(request, "dashboard.html", {
         "pending_users": pending_users,
         "approved_users": approved_users,
-        "groups": all_groups
+        "groups": all_groups,
+        "languages": all_languages
     })
+
+@require_http_methods(["POST"])
+def add_language(request):
+    """Add a new language from the dropdown menu."""
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Unauthorized'}, status=403)
+    
+    try:
+        data = json.loads(request.body)
+        name = data.get('name')
+        
+        if name:
+            lang, created = Language.objects.get_or_create(name=name)
+            if not created and not lang.is_active:
+                # If it exists but was disabled, re-enable it
+                lang.is_active = True
+                lang.save()
+                return JsonResponse({'success': True})
+            if created:
+                return JsonResponse({'success': True})
+            return JsonResponse({'success': False, 'error': f'"{name}" is already in the list.'}, status=400)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    return JsonResponse({'success': False, 'error': 'Language name is required.'}, status=400)
+
+@require_http_methods(["POST"])
+def toggle_language(request, lang_id):
+    """Enable or disable a language's visibility."""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+    
+    lang = get_object_or_404(Language, id=lang_id)
+    lang.is_active = not lang.is_active
+    lang.save()
+    return JsonResponse({'success': True, 'is_active': lang.is_active})
+
+@require_http_methods(["POST"])
+def delete_language(request, lang_id):
+    """Hard delete a language from the database."""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+    
+    lang = get_object_or_404(Language, id=lang_id)
+    lang.delete()
+    return JsonResponse({'success': True})
 
 def approve_user(request, profile_id):
     """Directly approve a user from the dashboard."""
@@ -487,8 +570,10 @@ def chat(request):
         if not user_name or not code:
             return render(request, "chat.html", {"error": "Please enter both name and group code"})
         
-        # Allow any username for both English and Tamil groups
-        language_mode = language_mode if language_mode in ['english', 'tamil'] else 'english'
+        # Accept any language from user selection (validated by Language model)
+        # Default to 'english' if empty or invalid
+        if not language_mode:
+            language_mode = 'english'
         
         # Ensure session key exists
         if not request.session.session_key:
@@ -539,7 +624,16 @@ def chat(request):
         request.session['group_code'] = code
         return redirect("group", code=group.code)
 
-    return render(request, "chat.html")
+    # Get active languages from database
+    try:
+        active_languages = Language.objects.filter(is_active=True).values('id', 'name').order_by('name')
+    except:
+        active_languages = []
+    
+    context = {
+        'languages': active_languages
+    }
+    return render(request, "chat.html", context)
 
 def group_manage(request):
     """New view to handle group creation and listing."""
@@ -615,16 +709,13 @@ def group(request, code):
     except Group.DoesNotExist:
         return redirect('chat')
     
-    should_delete, reason = check_and_cleanup_group(group)
-    if should_delete:
-        return render(request, "chat.html", {
-            "info": f"Group was deleted due to inactivity ({reason}). Please create a new one!"
-        })
+    # REMOVED: check_and_cleanup_group() - now handled by background cron job
+    # This prevents expensive operations during user requests
     
     user_name = request.session.get('user_name', 'Anonymous')
     user_language = request.session.get('language', 'English')
     user_language_mode = request.session.get('language_mode', 'english').lower()
-    session_id = request.session.session_key
+    session_id = ensure_session(request)
     
     # Ensure user is a member of the group
     GroupMember.objects.get_or_create(
@@ -636,29 +727,55 @@ def group(request, code):
     # Get messages from database
     raw_messages = Message.objects.filter(group=group).order_by('timestamp')
     
-    # Filter and prepare messages based on language mode
+    # MULTILINGUAL WORKFLOW:
+    # 1. Messages are stored as canonical English in database
+    # 2. Each user sees the message translated to THEIR selected language
+    # 3. This ensures consistency: all users see the same message, just in different languages
+    
     messages_list = []
     for msg in raw_messages:
-        # Get language versions
-        tamil_version = msg.tamil_content or msg.translated_content
+        # Get the canonical English version (base for all translations)
         english_version = ensure_us_english(msg.english_content or msg.normalized_content or msg.content) if msg.content else ""
         
-        # Apply language purity filter based on user mode
-        if user_language_mode == 'tamil':
-            # TAMIL MODE: Show ONLY Tamil (no English characters)
-            display_content = ensure_tamil_only_display(tamil_version) if tamil_version else tamil_version
-            display_content = display_content or tamil_version or english_version
-        else:
-            # ENGLISH MODE: Show ONLY English (no Tamil characters)
+        # TRANSLATE TO USER'S LANGUAGE MODE
+        display_content = english_version
+        
+        if user_language_mode == 'english':
+            # English mode: Display canonical English
             display_content = ensure_english_only_display(english_version) if english_version else english_version
+        
+        elif user_language_mode == 'tamil':
+            # Tamil mode: Translate English → Tamil
+            # First try cached tamil_content for backward compatibility
+            if msg.tamil_content:
+                display_content = ensure_tamil_only_display(msg.tamil_content)
+            else:
+                # Translate on-the-fly
+                try:
+                    success, tamil_text, _ = translate_text(english_version, 'Tamil')
+                    display_content = tamil_text if success else english_version
+                except:
+                    display_content = english_version
+        
+        else:
+            # OTHER LANGUAGES (Hindi, Telugu, Malayalam, Kannada, Bengali, Gujarati, Marathi, Punjabi, Urdu)
+            # 🔴 CRITICAL FIX: Use translate_message_for_user to ensure source_language='English' is passed
+            # This ensures proper translation FROM English TO target language (e.g., English→Malayalam)
+            from chatapp.utils.language import translate_message_for_user
+            
+            try:
+                display_content = translate_message_for_user(english_version, user_language_mode)
+            except Exception as e:
+                logger.warning(f"Translation to {user_language_mode} failed: {e}")
+                display_content = english_version
         
         # Prepare message object for template
         msg_data = {
             'id': msg.id,
             'user_name': msg.user_name,
-            'content': display_content,  # Filtered display content
+            'content': display_content,  # User's language translation (legacy key)
+            'display_content': display_content,  # Explicit translated text for template
             'original_content': msg.content,
-            'tamil_content': tamil_version,
             'english_content': english_version,
             'message_type': msg.message_type,
             'timestamp': msg.timestamp,
@@ -679,6 +796,39 @@ def group(request, code):
     
     last_message_timestamp = messages_list[-1]['timestamp'].isoformat() if messages_list else timezone.now().isoformat()
     
+    # Get the actual language name from database (with fallback mapping)
+    # Fallback language mapping for languages not yet in database
+    fallback_language_map = {
+        'tamil': 'Tamil',
+        'english': 'English',
+        'hindi': 'Hindi',
+        'telugu': 'Telugu',
+        'malayalam': 'Malayalam',
+        'kannada': 'Kannada',
+        'bengali': 'Bengali',
+        'gujarati': 'Gujarati',
+        'marathi': 'Marathi',
+        'punjabi': 'Punjabi',
+        'urdu': 'Urdu',
+    }
+    
+    # Start with fallback name based on language_mode
+    language_name = fallback_language_map.get(user_language_mode.lower(), user_language_mode.capitalize())
+    
+    try:
+        # Try to get actual language name from database (case-insensitive match)
+        lang_obj = Language.objects.filter(name__iexact=user_language_mode, is_active=True).first()
+        if lang_obj:
+            language_name = lang_obj.name
+        else:
+            # If not found in database, check if it's active in database with different case
+            lang_obj = Language.objects.filter(name__iexact=fallback_language_map.get(user_language_mode.lower(), ''), is_active=True).first()
+            if lang_obj:
+                language_name = lang_obj.name
+    except Exception as e:
+        logger.warning(f"Error fetching language name for mode {user_language_mode}: {str(e)}")
+        # Use fallback name already set above
+    
     context = {
         "group": group,
         "messages": messages_list,
@@ -686,7 +836,7 @@ def group(request, code):
         "online_count": online_users.count(),
         "last_message_timestamp": last_message_timestamp,
         "language": user_language,
-        "language_name": user_language,
+        "language_name": language_name,
         "language_mode": user_language_mode,
         "user_session_id": session_id,
     }
@@ -722,31 +872,31 @@ import google.generativeai as genai
 # 🔹 SPEECH TO TEXT
 # ================================
 def speech_to_text(audio_file_path, lang="en-IN"):
-    print(f"🎤 STT: Processing file {audio_file_path} with language {lang}")
+    print(f"[MIC] STT: Processing file {audio_file_path} with language {lang}")
     recognizer = sr.Recognizer()
     wav_file_path = audio_file_path + ".wav"
 
     try:
-        print("🔄 Converting audio to WAV format...")
+        print("[PROCESS] Converting audio to WAV format...")
         audio = AudioSegment.from_file(audio_file_path)
-        print(f"📊 Audio loaded: {len(audio)}ms duration, {audio.frame_rate}Hz")
+        print(f"[STATS] Audio loaded: {len(audio)}ms duration, {audio.frame_rate}Hz")
 
         # Normalize audio for better recognition
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio = effects.normalize(audio)
         audio.export(wav_file_path, format="wav")
-        print(f"✅ WAV conversion complete ({audio.frame_rate}Hz, {audio.channels} channel)")
+        print(f"[SUCCESS] WAV conversion complete ({audio.frame_rate}Hz, {audio.channels} channel)")
 
-        print("🎧 Starting speech recognition...")
+        print("[AUDIO] Starting speech recognition...")
         with sr.AudioFile(wav_file_path) as source:
-            print("🔊 Adjusting for ambient noise...")
+            print("[AUDIO] Adjusting for ambient noise...")
             recognizer.energy_threshold = 100
             recognizer.dynamic_energy_threshold = True
             recognizer.pause_threshold = 0.5
             recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            print("🎙️ Recording audio data...")
+            print("[AUDIO] Recording audio data...")
             audio_data = recognizer.record(source)
-            print(f"📝 Audio data recorded, calling Google API with lang={lang}...")
+            print(f"[STT] Audio data recorded, calling Google API with lang={lang}...")
 
             def try_recognize(locale):
                 try:
@@ -754,14 +904,14 @@ def speech_to_text(audio_file_path, lang="en-IN"):
                     if isinstance(result, dict) and result.get('alternative'):
                         text = result['alternative'][0].get('transcript', '').strip()
                         if text:
-                            print(f"✅ STT Success ({locale}): '{text}'")
+                            print(f"[SUCCESS] STT Success ({locale}): '{text}'")
                             return text
                     return None
                 except sr.UnknownValueError:
-                    print(f"⚠️ No speech recognized with {locale}")
+                    print(f"[WARNING] No speech recognized with {locale}")
                     return None
                 except sr.RequestError as e:
-                    print(f"❌ STT Request failed for {locale}: {e}")
+                    print(f"[FAIL] STT Request failed for {locale}: {e}")
                     return None
 
             if lang == "en":
@@ -777,19 +927,19 @@ def speech_to_text(audio_file_path, lang="en-IN"):
             return ""
 
     except sr.UnknownValueError:
-        print("❌ STT Error: Speech not recognized (UnknownValueError)")
+        print("[FAIL] STT Error: Speech not recognized (UnknownValueError)")
         return ""
     except sr.RequestError as e:
-        print(f"❌ STT Error: API request failed: {e}")
+        print(f"[FAIL] STT Error: API request failed: {e}")
         return ""
     except Exception as e:
-        print(f"❌ STT Error: Unexpected error: {e}")
+        print(f"[FAIL] STT Error: Unexpected error: {e}")
         return ""
 
     finally:
         if os.path.exists(wav_file_path):
             os.remove(wav_file_path)
-            print("🧹 Cleaned up WAV file")
+            print("[CLEAN] Cleaned up WAV file")
 
 # ================================
 # 🔹 GEMINI TRANSLATION
@@ -849,7 +999,7 @@ def text_to_voice_by_mode(tamil_text, english_text, language_mode):
 
 def generate_bilingual_audio(tamil_text, english_text):
     """Generate BOTH Tamil and English audio files for voice messages."""
-    print(f"🎵 Generating bilingual audio for Tamil: '{tamil_text}' (len: {len(tamil_text) if tamil_text else 0}), English: '{english_text}' (len: {len(english_text) if english_text else 0})")
+    print(f"[AUDIO] Generating bilingual audio for Tamil: '{tamil_text}' (len: {len(tamil_text) if tamil_text else 0}), English: '{english_text}' (len: {len(english_text) if english_text else 0})")
 
     try:
         from django.conf import settings
@@ -859,9 +1009,9 @@ def generate_bilingual_audio(tamil_text, english_text):
 
         # Generate English audio
         try:
-            print("🔊 Generating English audio...")
+            print("[AUDIO] Generating English audio...")
             if not english_text or not english_text.strip():
-                print("⚠️ No English text provided, skipping English audio generation")
+                print("[WARNING] No English text provided, skipping English audio generation")
                 audio_files['english'] = None
             else:
                 english_filename = f"{uuid.uuid4()}.mp3"
@@ -869,7 +1019,7 @@ def generate_bilingual_audio(tamil_text, english_text):
 
                 tts_en = gTTS(text=english_text, lang="en", slow=False)
                 tts_en.save(english_audio_path)
-                print(f"✅ English audio saved: {english_audio_path}")
+                print(f"[SUCCESS] English audio saved: {english_audio_path}")
 
                 audio_files['english'] = {
                     'url': f"{settings.MEDIA_URL}{english_filename}",
@@ -877,14 +1027,14 @@ def generate_bilingual_audio(tamil_text, english_text):
                     'filename': english_filename
                 }
         except Exception as e:
-            print(f"❌ Failed to generate English audio: {str(e)}")
+            print(f"[FAIL] Failed to generate English audio: {str(e)}")
             audio_files['english'] = None
 
         # Generate Tamil audio
         try:
-            print("🔊 Generating Tamil audio...")
+            print("[AUDIO] Generating Tamil audio...")
             if not tamil_text or not tamil_text.strip():
-                print("⚠️ No Tamil text provided, skipping Tamil audio generation")
+                print("[WARNING] No Tamil text provided, skipping Tamil audio generation")
                 audio_files['tamil'] = None
             else:
                 tamil_filename = f"{uuid.uuid4()}.mp3"
@@ -892,7 +1042,7 @@ def generate_bilingual_audio(tamil_text, english_text):
 
                 tts_ta = gTTS(text=tamil_text, lang="ta", slow=False)
                 tts_ta.save(tamil_audio_path)
-                print(f"✅ Tamil audio saved: {tamil_audio_path}")
+                print(f"[SUCCESS] Tamil audio saved: {tamil_audio_path}")
 
                 audio_files['tamil'] = {
                     'url': f"{settings.MEDIA_URL}{tamil_filename}",
@@ -900,14 +1050,14 @@ def generate_bilingual_audio(tamil_text, english_text):
                     'filename': tamil_filename
                 }
         except Exception as e:
-            print(f"❌ Failed to generate Tamil audio: {str(e)}")
+            print(f"[FAIL] Failed to generate Tamil audio: {str(e)}")
             audio_files['tamil'] = None
 
-        print(f"📊 Audio generation complete: Tamil={audio_files['tamil'] is not None}, English={audio_files['english'] is not None}")
+        print(f"[STATS] Audio generation complete: Tamil={audio_files['tamil'] is not None}, English={audio_files['english'] is not None}")
         return audio_files
 
     except Exception as e:
-        print(f"❌ generate_bilingual_audio error: {str(e)}")
+        print(f"[FAIL] generate_bilingual_audio error: {str(e)}")
         return {'english': None, 'tamil': None}
 
 # ================================
@@ -937,10 +1087,10 @@ def upload_voice_message(request, code):
             for chunk in audio_file.chunks():
                 destination.write(chunk)
 
-        print("✅ Audio saved:", temp_path)
+        print("[SUCCESS] Audio saved:", temp_path)
 
         # =========================================
-        # 🎯 GET MODE
+        # [TARGET] GET MODE
         # =========================================
         session_id = request.session.session_key
         if not session_id:
@@ -950,7 +1100,7 @@ def upload_voice_message(request, code):
         language_mode = get_language_mode(request, session_id)
 
         # =========================================
-        # 🧠 SPEECH → TEXT (BASED ON MODE)
+        # [AI] SPEECH -> TEXT (BASED ON MODE)
         # =========================================
         stt_failed = False
 
@@ -1041,51 +1191,51 @@ def upload_voice_message(request, code):
                 audio_mime_type=message_audio_mime_type
             )
 
-            # ✅ SAVE BILINGUAL AUDIO FILES
+            # [SUCCESS] SAVE BILINGUAL AUDIO FILES
             from django.core.files import File
-            print(f"💾 Saving audio files: English={audio_files.get('english') is not None}, Tamil={audio_files.get('tamil') is not None}")
+            print(f"[SAVE] Saving audio files: English={audio_files.get('english') is not None}, Tamil={audio_files.get('tamil') is not None}")
             
             # Save English audio
             if audio_files.get('english') and audio_files['english']['path'] and os.path.exists(audio_files['english']['path']):
                 try:
-                    print(f"💾 Saving English audio file: {audio_files['english']['path']}")
+                    print(f"[SAVE] Saving English audio file: {audio_files['english']['path']}")
                     with open(audio_files['english']['path'], 'rb') as f:
                         message.audio_file_english.save(audio_files['english']['filename'], File(f))
-                    print("✅ English audio saved to database")
+                    print("[SUCCESS] English audio saved to database")
                 except Exception as e:
-                    print(f"❌ Failed to save English audio: {str(e)}")
+                    print(f"[FAIL] Failed to save English audio: {str(e)}")
             
             # Save Tamil audio
             if audio_files.get('tamil') and audio_files['tamil']['path'] and os.path.exists(audio_files['tamil']['path']):
                 try:
-                    print(f"💾 Saving Tamil audio file: {audio_files['tamil']['path']}")
+                    print(f"[SAVE] Saving Tamil audio file: {audio_files['tamil']['path']}")
                     with open(audio_files['tamil']['path'], 'rb') as f:
                         message.audio_file_tamil.save(audio_files['tamil']['filename'], File(f))
-                    print("✅ Tamil audio saved to database")
+                    print("[SUCCESS] Tamil audio saved to database")
                 except Exception as e:
-                    print(f"❌ Failed to save Tamil audio: {str(e)}")
+                    print(f"[FAIL] Failed to save Tamil audio: {str(e)}")
             
             # Set default audio_file to English version if available
             primary_audio_saved_as_mp3 = False
             if audio_files.get('english') and audio_files['english']['path']:
                 try:
-                    print(f"💾 Setting default audio file to English: {audio_files['english']['path']}")
+                    print(f"[SAVE] Setting default audio file to English: {audio_files['english']['path']}")
                     with open(audio_files['english']['path'], 'rb') as f:
                         message.audio_file.save(audio_files['english']['filename'], File(f))
-                    print("✅ Default audio file set")
+                    print("[SUCCESS] Default audio file set")
                     primary_audio_saved_as_mp3 = True
                 except Exception as e:
-                    print(f"❌ Failed to save default audio file: {str(e)}")
+                    print(f"[FAIL] Failed to save default audio file: {str(e)}")
             elif os.path.exists(temp_path):
                 try:
-                    print(f"💾 Saving original uploaded voice file as fallback: {temp_path}")
+                    print(f"[SAVE] Saving original uploaded voice file as fallback: {temp_path}")
                     with open(temp_path, 'rb') as f:
                         message.audio_file.save(os.path.basename(temp_path), File(f))
-                    print("✅ Saved original voice file to database")
+                    print("[SUCCESS] Saved original voice file to database")
                 except Exception as e:
-                    print(f"❌ Failed to save original voice file: {str(e)}")
+                    print(f"[FAIL] Failed to save original voice file: {str(e)}")
             else:
-                print("⚠️ No audio file available to save for this message")
+                print("[WARNING] No audio file available to save for this message")
 
             message.translated_content = english_text
             message.translated_language = 'English'
@@ -1234,9 +1384,24 @@ def get_online_users(request, code):
     """Get list of online users in the group."""
     try:
         group = Group.objects.get(code=code)
-        should_delete, delete_reason = check_and_cleanup_group(group)
-        if should_delete:
-            return JsonResponse({'error': 'Group deleted', 'status': 'group_deleted', 'reason': delete_reason}, status=410)
+        session_id = ensure_session(request)
+        
+        # AUTHORIZATION CHECK: Must be group member
+        is_member = GroupMember.objects.filter(
+            group=group,
+            session_id=session_id
+        ).exists()
+        if not is_member:
+            return JsonResponse({'error': 'Unauthorized access to group'}, status=403)
+        
+        # REMOVED: check_and_cleanup_group() - now handled by background cron job
+        
+        # CACHE ONLINE USERS: Reduce database queries
+        from django.core.cache import cache
+        cache_key = f'online_users_{group.code}'
+        cached_users = cache.get(cache_key)
+        if cached_users:
+            return JsonResponse(cached_users)
         
         group_user_session_ids = group.members.values_list('session_id', flat=True)
         online_users = AnonymousUser.objects.filter(
@@ -1246,8 +1411,12 @@ def get_online_users(request, code):
         ).values_list('user_name', 'id', 'session_id').distinct()
         
         users_list = [{'id': user[1], 'session_id': user[2], 'display_name': user[0] or 'Anonymous'} for user in online_users]
+        result = {'success': True, 'users': users_list, 'count': len(users_list)}
         
-        return JsonResponse({'success': True, 'users': users_list, 'count': len(users_list)})
+        # Cache for 30 seconds
+        cache.set(cache_key, result, 30)
+        
+        return JsonResponse(result)
     except Group.DoesNotExist:
         return JsonResponse({'error': 'Group not found', 'status': 'group_not_found'}, status=404)
     except Exception as e:
@@ -1257,27 +1426,55 @@ def get_online_users(request, code):
 
 @require_http_methods(["GET"])
 def get_new_messages(request, code):
-    """Get new messages since last timestamp - returns both Tamil and English versions."""
+    """Get new messages since last timestamp - translates to user's language mode in real-time."""
     try:
         group = Group.objects.get(code=code)
-        session_id = request.session.session_key
+        session_id = ensure_session(request)
         since_timestamp = request.GET.get('since', '')
         user_language_mode = get_language_mode(request, session_id)
         
-        should_delete, delete_reason = check_and_cleanup_group(group)
-        if should_delete:
-            return JsonResponse({'error': 'Group deleted', 'status': 'group_deleted', 'reason': delete_reason}, status=410)
+        # AUTHORIZATION CHECK: Must be group member
+        is_member = GroupMember.objects.filter(
+            group=group,
+            session_id=session_id
+        ).exists()
+        if not is_member:
+            return JsonResponse({'error': 'Unauthorized access to group'}, status=403)
         
-        messages_query = Message.objects.filter(group=group).order_by('timestamp')
+        # REMOVED: check_and_cleanup_group() - now handled by background cron job
+        # This prevents expensive operations during user requests
+        
+        # PAGINATION FIX: Limit messages to prevent memory explosion
+        base_query = Message.objects.filter(group=group)
         
         if since_timestamp:
             try:
                 from django.utils.dateparse import parse_datetime
                 since_dt = parse_datetime(since_timestamp)
                 if since_dt:
-                    messages_query = messages_query.filter(timestamp__gt=since_dt)
-            except Exception:
-                pass
+                    # Ensure timezone-aware comparison
+                    if timezone.is_naive(since_dt):
+                        since_dt = timezone.make_aware(since_dt)
+                    base_query = base_query.filter(timestamp__gt=since_dt)
+            except Exception as e:
+                logger.warning(f"Invalid since_timestamp format: {since_timestamp}, error: {e}")
+                # Continue without filtering
+        
+        messages_query = base_query.order_by('-timestamp')[:50]
+        messages_query = messages_query[::-1]  # Reverse to chronological order
+        
+        # PRELOAD DELETED MESSAGES: Prevent N+1 queries
+        deleted_message_ids = set(
+            DeletedMessage.objects.filter(
+                session_id=session_id
+            ).values_list('message_id', flat=True)
+        )
+        
+        messages_list = []
+        for msg_obj in messages_query:
+            # Skip deleted messages
+            if msg_obj.id in deleted_message_ids:
+                continue
         
         messages_list = []
         for msg_obj in messages_query:
@@ -1286,24 +1483,43 @@ def get_new_messages(request, code):
                 continue
             
             try:
-                tamil_version = msg_obj.tamil_content or msg_obj.translated_content
+                # Get canonical English version
                 english_version = ensure_us_english(msg_obj.english_content or msg_obj.normalized_content or msg_obj.content)
                 
-                # Enforce language purity based on mode
+                # TRANSLATE TO USER'S LANGUAGE MODE
+                display_content = english_version
+                
                 if user_language_mode == 'english':
-                    # English mode: ONLY English characters in display
+                    # English mode: Display canonical English
                     display_content = ensure_english_only_display(english_version)
-                else:  # tamil mode
-                    # Tamil mode: ONLY Tamil characters in display
-                    # Ensure no English letters in the Tamil display
-                    display_content = ensure_tamil_only_display(tamil_version) if tamil_version else tamil_version
-                    display_content = display_content or tamil_version or english_version
+                
+                elif user_language_mode == 'tamil':
+                    # Tamil mode: Translate English → Tamil
+                    if msg_obj.tamil_content:
+                        display_content = ensure_tamil_only_display(msg_obj.tamil_content)
+                    else:
+                        try:
+                            success, tamil_text, _ = translate_text(english_version, 'Tamil', source_language='English')
+                            display_content = tamil_text if success else english_version
+                        except:
+                            display_content = english_version
+                
+                else:
+                    # OTHER LANGUAGES: Use translate_message_for_user with proper source_language parameter
+                    # 🔴 CRITICAL FIX: This ensures source_language='English' is passed for proper translation
+                    from chatapp.utils.language import translate_message_for_user
+                    
+                    try:
+                        display_content = translate_message_for_user(english_version, user_language_mode)
+                    except Exception as e:
+                        logger.exception(f"Translation to {user_language_mode} failed for message {msg_obj.id}: {e}")
+                        display_content = english_version
                 
                 message_obj = {
                     'id': msg_obj.id,
                     'user_name': msg_obj.user_name,
-                    'content': display_content,
-                    'tamil': tamil_version,
+                    'content': display_content,  # Translated content for user's language
+                    'display_content': display_content,
                     'english': english_version,
                     'original_content': msg_obj.content,
                     'message_type': msg_obj.message_type,
@@ -1345,17 +1561,32 @@ def send_message_ajax(request, code):
     """Send text message via AJAX with dual-mode language support."""
     try:
         group = Group.objects.get(code=code)
-        should_delete, delete_reason = check_and_cleanup_group(group)
-        if should_delete:
-            return JsonResponse({'error': 'Group deleted', 'status': 'group_deleted', 'reason': delete_reason}, status=410)
-        
+        session_id = ensure_session(request)
         user_name = request.session.get('user_name', 'Anonymous')
-        session_id = request.session.session_key
         content = request.POST.get('message', '').strip()
         user_language_mode = get_language_mode(request, session_id)
         
+        # AUTHORIZATION CHECK: Must be group member
+        is_member = GroupMember.objects.filter(
+            group=group,
+            session_id=session_id
+        ).exists()
+        if not is_member:
+            return JsonResponse({'error': 'Unauthorized access to group'}, status=403)
+        
+        # REMOVED: check_and_cleanup_group() - now handled by background cron job
+        # This prevents expensive operations during user requests
+        
         if not content:
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
+
+        # RATE LIMITING: Prevent spam
+        from django.core.cache import cache
+        rate_limit_key = f'send_message_{session_id}'
+        message_count = cache.get(rate_limit_key, 0)
+        if message_count >= 20:  # 20 messages per minute
+            return JsonResponse({'error': 'Rate limit exceeded. Please wait before sending more messages.'}, status=429)
+        cache.set(rate_limit_key, message_count + 1, 60)  # 1 minute expiry
 
         # Convert Tanglish instead of rejecting
         if contains_tanglish(content):
@@ -1383,48 +1614,55 @@ def send_message_ajax(request, code):
         
         # Process message based on language mode with auto-conversion and fallbacks
         try:
-            if user_language_mode == 'english':
-                # ENGLISH MODE: Accept English, auto-convert Tamil to English
-                english_version, tamil_version, validation_msg, should_warn = process_english_mode_message(content)
-                display_content = english_version
-                
-                if should_warn and validation_msg:
-                    logger.warning(f"Tamil converted to English in English mode: {content[:50]}")
-            else:  # tamil mode
-                # TAMIL MODE: Accept Tamil + English, auto-convert English to Tamil
-                english_version, tamil_version, validation_msg, should_warn = process_tamil_mode_message(content)
-                display_content = tamil_version
-                
-                if should_warn and validation_msg:
-                    logger.warning(f"English converted to Tamil in Tamil mode: {content[:50]}")
+            # Use the new generic multi-language processor
+            english_version, display_content, validation_msg, should_warn, tamil_version = process_message_content(content, user_language_mode)
         except Exception as e:
-            logger.warning(f"Translation failed, using original: {str(e)}")
-            # Fallback: use original content
-            english_version = content
-            tamil_version = content
-            display_content = content
-            validation_msg = "⚠️ Translation failed. Using original text."
-            should_warn = True
-        anon_user, _ = AnonymousUser.objects.get_or_create(session_id=session_id, defaults={'user_name': user_name})
-        anon_user.last_seen = timezone.now()
-        anon_user.is_online = True
-        anon_user.save(update_fields=['last_seen', 'is_online'])
+            
+            return JsonResponse({'error': str(e)}, status=400)
         
-        message = save_message(group, content, english_version, tamil_version, display_content,
-                              user_name, session_id, user_language_mode)
-        
+        # STORE CANONICAL ENGLISH VERSION ONLY
+        # This ensures all users get the same base message
+        # Each user will see their own language translation when fetching
+        message = Message.objects.create(
+            group=group,
+            user_name=user_name,
+            session_id=session_id,
+            content=english_version,  # Store canonical English
+            normalized_content=english_version,
+            english_content=english_version,
+            tamil_content=tamil_version,  # Keep for backward compatibility
+            message_type='text',
+            translations='',
+            # Don't store translated_content/language - will be translated per-user on retrieval
+            translated_content='',
+            translated_language=''
+        )
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
         
-        logger.info(f"Message sent by {user_name} ({user_language_mode} mode)")
+        logger.debug(f"Message sent by {user_name} ({user_language_mode} mode)")
         
-        # Enforce language purity in response display
-        if user_language_mode == 'tamil':
-            # Tamil mode: Ensure ONLY Tamil characters in display
+        # TRANSLATE FOR IMMEDIATE RESPONSE DISPLAY
+        # Since we store canonical English, translate to user's language for immediate feedback
+        if user_language_mode == 'english':
+            display_for_response = ensure_english_only_display(english_version)
+        elif user_language_mode == 'tamil':
             display_for_response = ensure_tamil_only_display(display_content) if display_content else display_content
         else:
-            # English mode: Already enforced during processing
-            display_for_response = display_content
+            # OTHER LANGUAGES: Translate English → User's language for display
+            try:
+                translated_success, translated_text, _ = translate_text(english_version, SUPPORTED_LANGUAGES.get(user_language_mode, user_language_mode), source_language='English')
+                if translated_success and translated_text:
+                    display_for_response = translated_text
+                    # Apply script filtering for purity
+                    if user_language_mode == 'hindi':
+                        display_for_response = ensure_hindi_only_display(display_for_response)
+                    # Add similar for other languages if needed
+                else:
+                    display_for_response = english_version  # Fallback
+            except Exception as e:
+                logger.warning(f"Failed to translate response to {user_language_mode}: {e}")
+                display_for_response = english_version
         
         # Build response with optional validation message from system
         response_data = {
@@ -1433,6 +1671,7 @@ def send_message_ajax(request, code):
                 'id': message.id,
                 'user_name': message.user_name,
                 'content': display_for_response,
+                'display_content': display_for_response,
                 'tamil': tamil_version,
                 'english': english_version,
                 'timestamp': message.timestamp.isoformat(),
@@ -1576,20 +1815,33 @@ def synthesize_voice_message(request, code):
     """Synthesize translated text to speech and save as voice message."""
     try:
         group = Group.objects.get(code=code)
-        should_delete, delete_reason = check_and_cleanup_group(group)
-        if should_delete:
-            return JsonResponse({'error': 'Group deleted', 'status': 'group_deleted', 'reason': delete_reason}, status=410)
-        
+        session_id = ensure_session(request)
         user_name = request.session.get('user_name', 'Anonymous')
-        session_id = request.session.session_key
         user_language_mode = get_language_mode(request, session_id)
         
+        # AUTHORIZATION CHECK: Must be group member
+        is_member = GroupMember.objects.filter(
+            group=group,
+            session_id=session_id
+        ).exists()
+        if not is_member:
+            return JsonResponse({'error': 'Unauthorized access to group'}, status=403)
+        
+        # REMOVED: check_and_cleanup_group() - now handled by background cron job
+        
         text = request.POST.get('text', '').strip()
-        print(f"Received text for synthesis: '{text[:100]}'")
-        target_language = request.POST.get('language', 'English').strip()  # Target for synthesis
+        target_language = request.POST.get('language', 'English').strip()
         
         if not text or not target_language:
             return JsonResponse({'error': 'Missing text or language'}, status=400)
+        
+        # RATE LIMITING: Prevent abuse of TTS service
+        from django.core.cache import cache
+        tts_rate_key = f'tts_{session_id}'
+        tts_count = cache.get(tts_rate_key, 0)
+        if tts_count >= 10:  # 10 TTS requests per hour
+            return JsonResponse({'error': 'TTS rate limit exceeded. Please wait before requesting more speech synthesis.'}, status=429)
+        cache.set(tts_rate_key, tts_count + 1, 3600)  # 1 hour expiry
         
         if len(text) > 5000:
             return JsonResponse({'error': 'Text too long for synthesis (max 5000 chars)'}, status=400)
@@ -1599,8 +1851,21 @@ def synthesize_voice_message(request, code):
             logger.warning(f"Tanglish in synthesis request from {user_name}: {text[:100]}")
             return JsonResponse({'error': 'Tanglish not allowed. Use English or Tamil only.'}, status=400)
         
-        # Synthesize speech
-        lang_code = 'ta' if target_language.lower() == 'tamil' else 'en'
+        # Synthesize speech - map language names to gTTS codes
+        lang_code_map = {
+            'english': 'en',
+            'tamil': 'ta',
+            'hindi': 'hi',
+            'telugu': 'te',
+            'malayalam': 'ml',
+            'kannada': 'kn',
+            'bengali': 'bn',
+            'gujarati': 'gu',
+            'marathi': 'mr',
+            'punjabi': 'pa',
+            'urdu': 'ur',
+        }
+        lang_code = lang_code_map.get(target_language.lower(), 'en')  # Default to English
         success, audio_bytes, synth_msg = synthesize_speech_with_gtts(text, lang_code)
         
         if not success:
@@ -1645,7 +1910,7 @@ def synthesize_voice_message(request, code):
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
         
-        logger.info(f"Synthesized voice message from {user_name}, duration: {estimated_duration}s, language: {target_language}")
+        logger.debug(f"Synthesized voice message from {user_name}, duration: {estimated_duration}s, language: {target_language}")
         
         return JsonResponse({
             'success': True,
@@ -1676,8 +1941,8 @@ def admin_register_view(request):
     success = None
     secret_key = os.getenv('ADMIN_SECRET_KEY', '')
     
-    # 🔥 Check if secret key is required and validate it
-    provided_key = request.GET.get('key', '')
+    # 🔥 SECURITY FIX: Use POST only for admin key
+    provided_key = request.POST.get('admin_key', '') if request.method == 'POST' else ''
     
     # Count existing superusers
     superuser_count = User.objects.filter(is_superuser=True).count()
@@ -1689,49 +1954,59 @@ def admin_register_view(request):
             can_register = False
             error = "❌ Invalid or missing admin registration key"
     
-    # Check admin limit
+    # Check admin limit with transaction safety
     if superuser_count >= 3:
         return render(request, "admin_register.html", {
             "error": "❌ Admin limit reached (only 3 allowed)",
             "superuser_count": superuser_count
         })
 
-    if request.method == "POST":
-        if not can_register:
-            return render(request, "admin_register.html", {
-                "error": error,
-                "superuser_count": superuser_count
-            })
-        
-        username = request.POST.get("username", "").strip()
-        email = request.POST.get("email", "").strip()
-        password = request.POST.get("password", "").strip()
-        password_confirm = request.POST.get("password_confirm", "").strip()
+    if request.method != "POST":
+        return HttpResponseForbidden("POST method required")
+    
+    if not can_register:
+        return render(request, "admin_register.html", {
+            "error": error,
+            "superuser_count": superuser_count
+        })
+    
+    username = request.POST.get("username", "").strip()
+    email = request.POST.get("email", "").strip()
+    password = request.POST.get("password", "").strip()
+    password_confirm = request.POST.get("password_confirm", "").strip()
 
-        # Validation
-        if not username or not email or not password or not password_confirm:
-            error = "⚠️ All fields are required"
-        elif len(username) < 3:
-            error = "⚠️ Username must be at least 3 characters"
-        elif len(password) < 8:
-            error = "⚠️ Password must be at least 8 characters"
-        elif password != password_confirm:
-            error = "⚠️ Passwords don't match"
-        elif not email or '@' not in email:
-            error = "⚠️ Valid email required"
-        elif User.objects.filter(username=username).exists():
-            error = "⚠️ Username already exists"
-        elif User.objects.filter(email=email).exists():
-            error = "⚠️ Email already exists"
-        else:
-            try:
+    # Validation
+    if not username or not email or not password or not password_confirm:
+        error = "⚠️ All fields are required"
+    elif len(username) < 3:
+        error = "⚠️ Username must be at least 3 characters"
+    elif len(password) < 8:
+        error = "⚠️ Password must be at least 8 characters"
+    elif password != password_confirm:
+        error = "⚠️ Passwords don't match"
+    elif not email or '@' not in email:
+        error = "⚠️ Valid email required"
+    elif User.objects.filter(username=username).exists():
+        error = "⚠️ Username already exists"
+    elif User.objects.filter(email=email).exists():
+        error = "⚠️ Email already exists"
+    else:
+        # RACE CONDITION FIX: Use transaction.atomic()
+        from django.db import transaction
+        try:
+            with transaction.atomic():
+                # Recheck count inside transaction
+                current_count = User.objects.filter(is_superuser=True).count()
+                if current_count >= 3:
+                    raise ValueError("Admin limit reached during registration")
+                
                 # ✅ Create Django superuser with proper password hashing
                 user = User.objects.create_superuser(
                     username=username,
                     email=email,
                     password=password
                 )
-                logger.info(f"✅ New superuser created: {username} ({email})")
+                logger.info(f"[SUCCESS] New superuser created: {username} ({email})")
                 
                 success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
                 messages.success(request, f"Admin account created! You can now login with username '{username}'")
@@ -1739,12 +2014,14 @@ def admin_register_view(request):
                 # Redirect to login after 2 seconds (JS in template)
                 return render(request, "admin_register.html", {
                     "success": success,
-                    "superuser_count": superuser_count + 1,
+                    "superuser_count": current_count + 1,
                     "redirect": True
                 })
-            except Exception as e:
-                logger.error(f"❌ Error creating admin: {str(e)}")
-                error = f"❌ Error creating admin: {str(e)}"
+        except ValueError as ve:
+            error = f"❌ {str(ve)}"
+        except Exception as e:
+            logger.error(f"❌ Error creating admin: {str(e)}")
+            error = f"❌ Error creating admin: {str(e)}"
 
     return render(request, "admin_register.html", {
         "error": error,
