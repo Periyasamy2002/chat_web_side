@@ -3066,16 +3066,22 @@ def admin_register_view(request):
             "superuser_count": superuser_count
         })
 
-    if request.method != "POST":
-        return HttpResponseForbidden("POST method required")
-    
-    if not can_register:
-        return render(request, "admin_register.html", {
-            "error": error,
-            "superuser_count": superuser_count
-        })
-    
-    username = request.POST.get("username", "").strip()
+    if request.method == "POST":
+        provided_key = request.POST.get('admin_key', '')
+        
+        # If superuser exists, require secret key
+        if superuser_count > 0 and secret_key:
+            if provided_key != secret_key:
+                can_register = False
+                error = "❌ Invalid or missing admin registration key"
+
+        if not can_register:
+            return render(request, "admin_register.html", {
+                "error": error,
+                "superuser_count": superuser_count
+            })
+
+        username = request.POST.get("username", "").strip()
     email = request.POST.get("email", "").strip()
     password = request.POST.get("password", "").strip()
     password_confirm = request.POST.get("password_confirm", "").strip()
@@ -3127,7 +3133,7 @@ def admin_register_view(request):
         except Exception as e:
             logger.error(f"❌ Error creating admin: {str(e)}")
             error = f"❌ Error creating admin: {str(e)}"
-
+            
     return render(request, "admin_register.html", {
         "error": error,
         "success": success,
