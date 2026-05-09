@@ -3060,7 +3060,7 @@ def admin_register_view(request):
             error = "❌ Invalid or missing admin registration key"
     
     # Check admin limit with transaction safety
-    if superuser_count >= 2:
+    if superuser_count >= 3:
         return render(request, "admin_register.html", {
             "error": "❌ Admin limit reached (only 3 allowed)",
             "superuser_count": superuser_count
