@@ -5,11 +5,14 @@
 
 .manage-container {
     max-width: 900px;
-    margin: 2rem auto;
+    margin: 1.5rem auto;
     padding: 1rem;
     color: white;
+    width: 100%;
+    box-sizing: border-box;
 }
 
+/* CARD STYLING */
 .card {
     background: rgba(255,255,255,0.08);
     backdrop-filter: blur(12px);
@@ -19,13 +22,17 @@
     margin-bottom: 2rem;
 }
 
+.card h2 {
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+    color: #f093fb;
+}
+
 input {
     width: 100%;
     padding: 0.8rem;
     margin-top: 0.5rem;
-    border-radius: 10px;
-    border: none;
-    outline: none;
+    border-radius: 8px;
 }
 
 .btn {
@@ -48,14 +55,17 @@ table {
 }
 
 th, td {
-    padding: 1rem 0.5rem;
+    padding: 1rem 0.75rem;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     text-align: left;
 }
 
 .table-responsive {
+    width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.2) transparent;
 }
 
 th {
@@ -64,9 +74,18 @@ th {
 }
 
 td {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap; /* Forces horizontal scroll on mobile instead of squishing */
+}
+
+/* Action Buttons in Table */
+.action-cell {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-delete-small {
+    background:#f44336;color:white;border:none;padding:0.5rem 0.9rem;border-radius:8px;cursor:pointer;font-weight:bold;
 }
 
 .share-btn {
@@ -256,14 +275,12 @@ td {
                         <span class="countdown" data-expiry="{{ g.expiry_iso }}">--</span>
                     </td>
                     <td>
-                        <button class="share-btn" data-code="{{ g.code }}" data-name="{{ g.name }}">
-                            🔗 Share
-                        </button>
-                        <a href="{% url 'delete_group_entirely' g.code %}" style="margin-left:5px;">
-                            <button type="button" style="background:#f44336;color:white;border:none;padding:0.5rem 0.9rem;border-radius:8px;cursor:pointer;font-weight:bold;">
-                                🗑️ Delete
-                            </button>
-                        </a>
+                        <div class="action-cell">
+                            <button class="share-btn" data-code="{{ g.code }}" data-name="{{ g.name }}">🔗 Share</button>
+                            <a href="{% url 'delete_group_entirely' g.code %}">
+                                <button type="button" class="btn-delete-small">🗑️ Delete</button>
+                            </a>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}

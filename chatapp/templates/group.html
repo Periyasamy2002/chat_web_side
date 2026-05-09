@@ -24,10 +24,11 @@
         border-bottom: 2px solid rgba(102, 126, 234, 0.3);
         backdrop-filter: blur(10px);
         flex-shrink: 0;
-        min-height: 60px;
+        height: 65px;
         display: flex;
         align-items: center;
         justify-content: space-between;
+        z-index: 10;
     }
 
     .chat-header h2 {
@@ -35,6 +36,9 @@
         font-size: 1rem;
         margin: 0;
         flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .online-count {
@@ -52,6 +56,7 @@
         color: rgba(255, 255, 255, 0.8);
         display: flex;
         gap: 1rem;
+        align-items: center;
     }
 
     .messages-scroll {
@@ -92,7 +97,7 @@
     }
 
     .message-bubble {
-        max-width: 85%;
+        max-width: 70%; /* Better readability on PC */
         padding: 0.6rem 0.8rem;
         border-radius: 18px;
         word-wrap: break-word;
@@ -501,29 +506,44 @@
         color: white;
     }
 
-    @media (max-width: 768px) {
-        .message-bubble { max-width: 88%; }
-        .chat-header { padding: 0.75rem 1rem; }
-        .messages-scroll { padding: 0.75rem; }
-        .input-area { padding: 0.6rem 0.75rem; }
+    /* =========================================
+       RESPONSIVE MEDIA QUERIES
+    ========================================= */
+
+    /* TABLET VIEW */
+    @media (max-width: 1024px) {
+        .message-bubble { max-width: 80%; }
     }
 
-    @media (max-width: 480px) {
-        .chat-page { height: 100dvh; }
-        .chat-header { padding: 0.6rem 0.8rem; min-height: 55px; }
-        .chat-header h2 { font-size: 0.95rem; }
-        .header-info { font-size: 0.7rem; gap: 0.3rem; }
-        .online-count { padding: 0.15rem 0.4rem; font-size: 0.7rem; }
-        .messages-scroll { padding: 0.6rem; gap: 0.5rem; }
-        .message-bubble { max-width: 90%; padding: 0.5rem 0.75rem; font-size: 0.9rem; }
-        .message-header { margin-bottom: 0.15rem; font-size: 0.75rem; }
-        .message-time { font-size: 0.65rem; }
-        .play-btn { width: 30px; height: 30px; font-size: 0.95rem; }
-        .voice-duration { min-width: 28px; font-size: 0.65rem; }
-        .input-area { padding: 0.5rem 0.6rem; min-height: 48px; }
-        .input-form { gap: 0.35rem; }
-        .input-form input { padding: 0.5rem 0.7rem; font-size: 0.9rem; min-height: 36px; }
-        .send-btn, .mic-btn { min-width: 44px; min-height: 44px; font-size: 1rem; }
+    @media (max-width: 768px) {
+        .message-bubble { max-width: 85%; }
+        .header-info span:first-child { display: none; } /* Hide username on small tablets to save space */
+    }
+
+    /* MOBILE VIEW */
+    @media (max-width: 580px) {
+        .chat-header { 
+            height: auto; 
+            flex-direction: column; 
+            align-items: flex-start; 
+            gap: 5px; 
+            padding: 0.5rem 0.8rem; 
+        }
+        .chat-header h2 { font-size: 0.9rem; width: 100%; }
+        .header-info { width: 100%; justify-content: space-between; font-size: 0.75rem; gap: 5px; }
+        
+        .messages-scroll { padding: 0.5rem; }
+        .message-bubble { max-width: 92%; font-size: 0.9rem; }
+        
+        .input-area { padding: 0.5rem; }
+        .input-form input { font-size: 0.9rem; padding: 0.5rem 0.8rem; }
+        
+        .send-btn, .mic-btn { 
+            min-width: 40px; 
+            height: 40px; 
+            border-radius: 50%; 
+        }
+
         .context-menu { min-width: 150px; font-size: 0.85rem; }
         .confirmation-content { padding: 1.2rem; margin: 1rem; }
     }

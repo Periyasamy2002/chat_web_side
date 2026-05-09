@@ -3139,4 +3139,4 @@ def admin_register_view(request):
         "success": success,
         "superuser_count": superuser_count,
         "key_required": superuser_count > 0 and secret_key and not can_register
-    })
+    }) 

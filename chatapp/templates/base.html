@@ -8,389 +8,458 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
 
-<style>
+    <style>
+        /* ================= RESET ================= */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-/* ================= RESET ================= */
-*{
-    margin:0;
-    padding:0;
-    box-sizing:border-box;
-}
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: #050816;
+            color: white;
+            overflow-x: hidden;
+        }
 
-body{
-    font-family:'Poppins',sans-serif;
-    background:#050816;
-    color:white;
-    overflow-x:hidden;
-}
+        /* ================= BACKGROUND ================= */
+        body::before {
+            content: '';
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            background: #6c63ff;
+            filter: blur(150px);
+            opacity: 0.25;
+            top: -200px;
+            left: -200px;
+            z-index: -1;
+        }
 
-/* ================= BACKGROUND ================= */
-body::before{
-    content:'';
-    position:fixed;
-    width:600px;
-    height:600px;
-    background:#6c63ff;
-    filter:blur(150px);
-    opacity:0.25;
-    top:-200px;
-    left:-200px;
-    z-index:-1;
-}
+        body::after {
+            content: '';
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            background: #ff4ecd;
+            filter: blur(150px);
+            opacity: 0.25;
+            bottom: -200px;
+            right: -200px;
+            z-index: -1;
+        }
 
-body::after{
-    content:'';
-    position:fixed;
-    width:500px;
-    height:500px;
-    background:#ff4ecd;
-    filter:blur(150px);
-    opacity:0.25;
-    bottom:-200px;
-    right:-200px;
-    z-index:-1;
-}
+        /* ================= NAV ================= */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 25px;
 
-/* ================= NAV ================= */
-nav{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:15px 25px;
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(20px);
 
-    background:rgba(255,255,255,0.06);
-    backdrop-filter:blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 999;
 
-    position:sticky;
-    top:0;
-    z-index:999;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
 
-    border-bottom:1px solid rgba(255,255,255,0.08);
-}
+        /* LOGO */
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 18px;
+        }
 
-/* LOGO */
-.logo{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    font-weight:700;
-    font-size:18px;
-}
+        .logo i {
+            color: #6c63ff;
+            font-size: 22px;
+            animation: spin 6s linear infinite;
+        }
 
-.logo i{
-    color:#6c63ff;
-    font-size:22px;
-    animation:spin 6s linear infinite;
-}
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
 
-@keyframes spin{
-    100%{transform:rotate(360deg);}
-}
+        /* LINKS */
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            transition: 0.5s;
+        }
 
-/* LINKS */
-.nav-links{
-    display:flex;
-    gap:10px;
-    transition:0.5s;
-}
+        nav a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 14px;
+            border-radius: 30px;
+            position: relative;
+            overflow: hidden;
+            transition: 0.3s;
+        }
 
-nav a{
-    color:white;
-    text-decoration:none;
-    padding:8px 14px;
-    border-radius:30px;
-    position:relative;
-    overflow:hidden;
-    transition:0.3s;
-}
+        /* hover glow */
+        nav a::after {
+            content: '';
+            position: absolute;
+            width: 0%;
+            height: 100%;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #6c63ff, #ff4ecd);
+            transition: 0.4s;
+            z-index: -1;
+            border-radius: 30px;
+        }
 
-/* hover glow */
-nav a::after{
-    content:'';
-    position:absolute;
-    width:0%;
-    height:100%;
-    top:0;
-    left:50%;
-    transform:translateX(-50%);
-    background:linear-gradient(135deg,#6c63ff,#ff4ecd);
-    transition:0.4s;
-    z-index:-1;
-    border-radius:30px;
-}
+        nav a:hover::after {
+            width: 120%;
+        }
 
-nav a:hover::after{
-    width:120%;
-}
+        nav a:hover {
+            transform: translateY(-3px);
+        }
 
-nav a:hover{
-    transform:translateY(-3px);
-}
+        /* USER */
+        .user-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: opacity 0.3s ease;
+        }
 
-/* USER */
-.user-badge{
-    padding:6px 12px;
-    border-radius:20px;
-    background:rgba(255,255,255,0.08);
-    border:1px solid rgba(255,255,255,0.1);
-    transition: opacity 0.3s ease;
-}
+        .nav-user {
+            display: none;
+            width: 100%;
+            color: white;
+            text-decoration: none;
+            padding: 10px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
+            text-align: center;
+            margin: 0.75rem 0;
+        }
 
-.nav-user{
-    display:none;
-    width:100%;
-    color:white;
-    text-decoration:none;
-    padding:10px 14px;
-    border-radius:20px;
-    border:1px solid rgba(255,255,255,0.1);
-    background:rgba(255,255,255,0.08);
-    text-align:center;
-    margin:0.75rem 0;
-}
+        /* ================= MENU BUTTON ================= */
+        .menu-btn {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+        }
 
-/* ================= MENU BUTTON ================= */
-.menu-btn{
-    display:none;
-    flex-direction:column;
-    gap:5px;
-    cursor:pointer;
-}
+        .menu-btn span {
+            width: 28px;
+            height: 3px;
+            background: white;
+            border-radius: 10px;
+            transition: 0.4s;
+        }
 
-.menu-btn span{
-    width:28px;
-    height:3px;
-    background:white;
-    border-radius:10px;
-    transition:0.4s;
-}
+        .menu-btn.active span:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
 
-.menu-btn.active span:nth-child(1){
-    transform:rotate(45deg) translate(5px,5px);
-}
+        .menu-btn.active span:nth-child(2) {
+            opacity: 0;
+        }
 
-.menu-btn.active span:nth-child(2){
-    opacity:0;
-}
+        .menu-btn.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(5px, -5px);
+        }
 
-.menu-btn.active span:nth-child(3){
-    transform:rotate(-45deg) translate(5px,-5px);
-}
+        /* ================= MOBILE MENU ================= */
+        @media(max-width:768px) {
 
-/* ================= MOBILE MENU ================= */
-@media(max-width:768px){
+            nav {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
 
-nav{
-    flex-wrap:wrap;
-    gap:10px;
-}
+            .menu-btn {
+                display: flex;
+            }
 
-.menu-btn{
-    display:flex;
-}
+            .user-badge {
+                display: none;
+            }
 
-.user-badge{
-    display:none;
-}
+            .nav-links {
+                position: fixed;
+                top: 0;
+                right: -100%;
+                width: 280px;
+                height: 100vh;
 
-.nav-links{
-    position:fixed;
-    top:0;
-    right:-100%;
-    width:280px;
-    height:100vh;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
 
-    flex-direction:column;
-    justify-content:center;
-    align-items:center;
+                padding: 2rem 1.25rem;
+                background: rgba(10, 15, 30, 0.95);
+                backdrop-filter: blur(25px);
 
-    padding:2rem 1.25rem;
-    background:rgba(10,15,30,0.95);
-    backdrop-filter:blur(25px);
+                box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6);
+                z-index: 1000;
+                visibility: hidden;
+                transition: right 0.4s ease, visibility 0.4s;
+            }
 
-    box-shadow:-10px 0 40px rgba(0,0,0,0.6);
-}
+            .nav-links.show {
+                right: 0;
+                visibility: visible;
+            }
 
-.nav-links.show{
-    right:0;
-}
+            .nav-links a {
+                margin: 10px 0;
+                font-size: 18px;
+                opacity: 0;
+                transform: translateX(40px);
+                transition: 0.4s;
+                width: 100%;
+                text-align: center;
+            }
 
-.nav-links a{
-    margin:10px 0;
-    font-size:18px;
-    opacity:0;
-    transform:translateX(40px);
-    transition:0.4s;
-    width:100%;
-    text-align:center;
-}
+            .nav-links.show a {
+                opacity: 1;
+                transform: translateX(0);
+            }
 
-.nav-links.show a{
-    opacity:1;
-    transform:translateX(0);
-}
+            .nav-links.show a:nth-child(1) {
+                transition-delay: 0.1s;
+            }
 
-.nav-links.show a:nth-child(1){transition-delay:0.1s;}
-.nav-links.show a:nth-child(2){transition-delay:0.2s;}
-.nav-links.show a:nth-child(3){transition-delay:0.3s;}
-.nav-links.show a:nth-child(4){transition-delay:0.4s;}
-.nav-links.show a:nth-child(5){transition-delay:0.5s;}
+            .nav-links.show a:nth-child(2) {
+                transition-delay: 0.2s;
+            }
 
-.nav-user{
-    display:block;
-}
+            .nav-links.show a:nth-child(3) {
+                transition-delay: 0.3s;
+            }
 
-}
+            .nav-links.show a:nth-child(4) {
+                transition-delay: 0.4s;
+            }
 
-/* ================= CHAT ================= */
-.chat-wrapper{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    min-height:85vh;
-    padding:20px;
-}
+            .nav-links.show a:nth-child(5) {
+                transition-delay: 0.5s;
+            }
 
-.chat-box{
-    width:350px;
-    height:520px;
+            .nav-user {
+                display: block;
+            }
 
-    background:rgba(255,255,255,0.06);
-    backdrop-filter:blur(20px);
+        }
 
-    border-radius:25px;
-    padding:20px;
+        /* CLOSE BUTTON FOR MOBILE */
+        .close-menu {
+            display: none;
+            position: absolute;
+            top: 20px;
+            right: 25px;
+            font-size: 24px;
+            cursor: pointer;
+            color: white;
+        }
 
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
+        @media(max-width:768px) {
+            .close-menu {
+                display: block;
+            }
+        }
 
-    box-shadow:0 20px 60px rgba(0,0,0,0.5);
+        /* ================= GLOBAL RESPONSIVE TABLES ================= */
+        /* Wrap any table in <div class="table-responsive"> to enable this */
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+            margin-bottom: 1.5rem;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+        }
 
-    animation:pop 0.7s ease;
-}
+        /* Modern Scrollbar for Webkit browsers (Chrome, Safari, Edge) */
+        .table-responsive::-webkit-scrollbar {
+            height: 6px;
+        }
+        .table-responsive::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+        }
 
-@keyframes pop{
-    from{transform:scale(0.8);opacity:0;}
-    to{transform:scale(1);opacity:1;}
-}
+        
 
-.msg{
-    padding:10px;
-    margin:8px 0;
-    border-radius:15px;
-    font-size:14px;
-}
+        /* ================= CHAT ================= */
+        .chat-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 85vh;
+            padding: 20px;
+        }
 
-.left{
-    background:rgba(255,255,255,0.1);
-}
+        .chat-box {
+            width: 350px;
+            height: 520px;
 
-.right{
-    background:linear-gradient(135deg,#6c63ff,#ff4ecd);
-    text-align:right;
-}
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(20px);
 
-/* INPUT */
-.input-box{
-    display:flex;
-    gap:10px;
-}
+            border-radius: 25px;
+            padding: 20px;
 
-.input-box input{
-    flex:1;
-    padding:10px;
-    border:none;
-    border-radius:20px;
-    outline:none;
-    background:rgba(255,255,255,0.1);
-    color:white;
-}
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
 
-.send{
-    width:45px;
-    height:45px;
-    border:none;
-    border-radius:50%;
-    background:linear-gradient(135deg,#6c63ff,#ff4ecd);
-    color:white;
-    cursor:pointer;
-}
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 
-</style>
+            animation: pop 0.7s ease;
+        }
+
+        @keyframes pop {
+            from {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .msg {
+            padding: 10px;
+            margin: 8px 0;
+            border-radius: 15px;
+            font-size: 14px;
+        }
+
+        .left {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .right {
+            background: linear-gradient(135deg, #6c63ff, #ff4ecd);
+            text-align: right;
+        }
+
+        /* INPUT */
+        .input-box {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-box input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 20px;
+            outline: none;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .send {
+            width: 45px;
+            height: 45px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6c63ff, #ff4ecd);
+            color: white;
+            cursor: pointer;
+        }
+    </style>
 </head>
 
 <body>
 
-<nav>
+    <nav>
 
-    <!-- LOGO -->
-    <div class="logo">
-        <i class="fa-brands fa-rocketchat"></i>
-        <span>TRANIT</span>
-    </div>
+        <!-- LOGO -->
+        <div class="logo">
+            <i class="fa-brands fa-rocketchat"></i>
+            <span>TRANIT</span>
+        </div>
 
-    <!-- MENU BUTTON -->
-    <div class="menu-btn" onclick="toggleMenu()">
-        <span></span>
-        <span></span>
-        <span></span>
-    </div>
+        <!-- MENU BUTTON -->
+        <div class="menu-btn" onclick="toggleMenu()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
 
-    <!-- LINKS -->
-    <div class="nav-links">
+        <!-- LINKS -->
+        <div class="nav-links">
+            <div class="close-menu" onclick="toggleMenu()"><i class="fas fa-times"></i></div>
 
-        <a href="{% url 'home' %}">Home</a>
+            <a href="{% url 'home' %}">Home</a>
 
-        {% if user.is_authenticated %}
+            {% if user.is_authenticated %}
             <a href="#" class="nav-user">Hi, {{ user.username }}</a>
 
             {% if user.is_superuser %}
-                <a href="{% url 'dashboard' %}">Dashboard</a>
-                <a href="{% url 'group_manage' %}">Groups</a>
+            <a href="{% url 'dashboard' %}">Dashboard</a>
+            <a href="{% url 'group_manage' %}">Groups</a>
             {% endif %}
 
             <a href="{% url 'chat' %}">Chat</a>
+            <a href="{% url 'group_manage' %}">Groups</a>
             <a href="{% url 'logout' %}">Logout</a>
 
-        {% else %}
+            {% else %}
             <a href="{% url 'login' %}">Login</a>
             <a href="{% url 'register' %}">Register</a>
+            {% endif %}
+
+        </div>
+
+        <!-- USER -->
+        {% if user.is_authenticated %}
+        <div class="user-badge">
+            {{ user.username }}
+        </div>
         {% endif %}
 
+    </nav>
+
+    <!-- CHAT -->
+    <div class="chat-wrapper">
+        {% block content %}
+        {% endblock %}
+
     </div>
 
-    <!-- USER -->
-    {% if user.is_authenticated %}
-    <div class="user-badge">
-        {{ user.username }}
-    </div>
-    {% endif %}
+    <script>
+        function toggleMenu() {
+            document.querySelector(".nav-links").classList.toggle("show");
+            document.querySelector(".menu-btn").classList.toggle("active");
+        }
 
-</nav>
-
-<!-- CHAT -->
-<div class="chat-wrapper">
-    {% block content %}
-    {% endblock %}
-
-</div>
-
-<script>
-function toggleMenu(){
-    document.querySelector(".nav-links").classList.toggle("show");
-    document.querySelector(".menu-btn").classList.toggle("active");
-}
-
-document.querySelectorAll(".nav-links a").forEach(link => {
-    link.addEventListener("click", () => {
-        document.querySelector(".nav-links").classList.remove("show");
-        document.querySelector(".menu-btn").classList.remove("active");
-    });
-});
-</script>
+        document.querySelectorAll(".nav-links a").forEach(link => {
+            link.addEventListener("click", () => {
+                document.querySelector(".nav-links").classList.remove("show");
+                document.querySelector(".menu-btn").classList.remove("active");
+            });
+        });
+    </script>
 
 </body>
+
 </html>
