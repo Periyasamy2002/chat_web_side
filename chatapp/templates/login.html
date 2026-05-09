@@ -7,22 +7,23 @@
         justify-content: center;
         align-items: center;
         min-height: 100vh;
-        padding: 1rem;
+        padding: 0.75rem;
     }
     .auth-card {
         background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(240, 147, 251, 0.15));
         border: 1.5px solid rgba(102, 126, 234, 0.3);
         border-radius: 15px;
-        padding: 2rem;
+        padding: 1.5rem;
         backdrop-filter: blur(10px);
         width: 100%;
         max-width: 420px;
         color: white;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        box-sizing: border-box;
     }
     .auth-card h2 { text-align: center; margin-bottom: 1.5rem; font-size: 1.6rem; }
     .form-group { margin-bottom: 1.2rem; }
-    .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.95rem; }
     
     .auth-card input {
         width: 100%;
@@ -34,6 +35,7 @@
         box-sizing: border-box;
         font-size: 1rem;
         transition: all 0.3s ease;
+        min-height: 44px;
     }
     .auth-card input:focus { outline: none; border-color: #667eea; background: rgba(255, 255, 255, 0.15); box-shadow: 0 0 15px rgba(102, 126, 234, 0.3); }
     
@@ -47,8 +49,10 @@
         font-weight: 700;
         cursor: pointer;
         margin-top: 1rem;
+        font-size: 1rem;
         box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         transition: transform 0.3s ease;
+        min-height: 44px;
     }
     .submit-btn:hover { transform: translateY(-3px); }
     
@@ -63,8 +67,18 @@
     .alert-info { background: rgba(33, 150, 243, 0.1); color: #bbdefb; border-left-color: #2196f3; }
     
     .tab-container { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-radius: 12px; background: rgba(0, 0, 0, 0.2); padding: 0.3rem; }
-    .tab-btn { flex: 1; padding: 0.7rem; border: none; background: transparent; color: rgba(255, 255, 255, 0.6); font-weight: 700; cursor: pointer; border-radius: 10px; transition: all 0.3s ease; text-align: center; text-decoration: none; }
+    .tab-btn { flex: 1; padding: 0.7rem; border: none; background: transparent; color: rgba(255, 255, 255, 0.6); font-weight: 700; cursor: pointer; border-radius: 10px; transition: all 0.3s ease; text-align: center; text-decoration: none; font-size: 0.85rem; }
     .tab-btn.active { background: linear-gradient(90deg, #667eea, #764ba2); color: white; }
+    
+    @media (max-width: 480px) {
+        .auth-card { padding: 1.2rem; }
+        .auth-card h2 { font-size: 1.4rem; margin-bottom: 1.2rem; }
+        .tab-btn { font-size: 0.8rem; padding: 0.6rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { font-size: 0.9rem; }
+        .auth-card input { font-size: 0.95rem; padding: 0.7rem; }
+        .submit-btn { font-size: 0.95rem; }
+    }
 </style>
 
 <div class="auth-container">

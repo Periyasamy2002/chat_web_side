@@ -158,6 +158,70 @@
             opacity: 0.5;
             pointer-events: none;
         }
+        
+        /* MOBILE RESPONSIVE */
+        @media (max-width: 768px) {
+            body { padding: 15px; }
+            .container {
+                padding: 25px;
+                margin: 0 auto;
+            }
+            h1 { font-size: 24px; }
+            .subtitle { font-size: 13px; }
+            input[type="text"],
+            input[type="email"],
+            input[type="password"] {
+                padding: 11px;
+                font-size: 0.95rem;
+                min-height: 44px;
+            }
+            button {
+                padding: 12px;
+                font-size: 0.95rem;
+                min-height: 44px;
+            }
+            .button-group { gap: 8px; }
+            .form-group { margin-bottom: 15px; }
+            label { font-size: 13px; }
+        }
+        
+        @media (max-width: 480px) {
+            body { padding: 12px; }
+            .container {
+                padding: 20px;
+                border-radius: 12px;
+            }
+            h1 { font-size: 22px; margin-bottom: 8px; }
+            .subtitle { font-size: 12px; margin-bottom: 20px; }
+            .admin-count { padding: 10px; font-size: 13px; }
+            .form-group { margin-bottom: 13px; }
+            label { font-size: 12px; margin-bottom: 6px; }
+            input[type="text"],
+            input[type="email"],
+            input[type="password"] {
+                padding: 10px;
+                font-size: 0.9rem;
+                min-height: 44px;
+            }
+            button {
+                padding: 11px;
+                font-size: 0.9rem;
+                min-height: 44px;
+            }
+            .button-group {
+                flex-direction: column;
+                gap: 10px;
+                margin-top: 15px;
+            }
+            .button-group button { width: 100%; }
+            .back-link { margin-top: 15px; padding-top: 15px; }
+            .back-link a { font-size: 13px; }
+            .error, .success, .info { 
+                padding: 12px; 
+                font-size: 12px;
+                border-radius: 6px;
+            }
+        }
     </style>
 </head>
 <body>

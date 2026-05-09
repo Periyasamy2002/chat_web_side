@@ -30,7 +30,8 @@ body{
     display:flex;
     align-items:center;
     justify-content:center;
-    padding:40px;
+    padding:40px 20px;
+    box-sizing:border-box;
 }
 
 /* =========================
@@ -417,25 +418,96 @@ body{
 
 }
 
+@media(max-width:768px){
+    
+    .hero-section {
+        padding: 30px 15px;
+    }
+    
+    .hero-container {
+        gap: 40px;
+    }
+    
+    .hero-content h1 {
+        font-size: 2.8rem;
+    }
+    
+    .hero-content p {
+        font-size: 0.95rem;
+    }
+    
+    .feature-box {
+        padding: 25px;
+    }
+    
+    .feature-box h3 {
+        font-size: 1.3rem;
+    }
+}
+
 @media(max-width:600px){
 
+    .hero-section {
+        padding: 20px 12px;
+    }
+
     .hero-content h1{
-        font-size:2.4rem;
+        font-size:2rem;
+        line-height: 1.2;
+        margin-bottom: 15px;
     }
 
     .hero-content p{
-        font-size:16px;
+        font-size:0.9rem;
+        margin-bottom: 25px;
     }
 
     .main-btn,
     .secondary-btn{
         width:100%;
         text-align:center;
+        padding: 15px 20px;
+        font-size: 0.95rem;
+    }
+    
+    .hero-buttons {
+        gap: 12px;
+        flex-direction: column;
     }
 
     .glow{
-        width:400px;
-        height:400px;
+        width:300px;
+        height:300px;
+    }
+    
+    .stat-card {
+        padding: 15px 20px;
+        flex: 1 1 calc(50% - 12px);
+    }
+    
+    .stat-card h2 {
+        font-size: 22px;
+    }
+    
+    .stat-card p {
+        font-size: 12px;
+    }
+    
+    .feature-section {
+        margin-top: 40px;
+        gap: 15px;
+    }
+    
+    .feature-box {
+        padding: 20px;
+    }
+    
+    .feature-box h3 {
+        font-size: 1.1rem;
+    }
+    
+    .feature-icon {
+        font-size: 40px;
     }
 
 }

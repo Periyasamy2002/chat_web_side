@@ -172,6 +172,21 @@ td {
 
 /* MOBILE RESPONSIVE */
 @media (max-width: 768px) {
+    .manage-container {
+        padding: 0.8rem;
+        margin: 1rem auto;
+    }
+    
+    .card {
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .card h2 {
+        font-size: 1.3rem;
+        margin-bottom: 1rem;
+    }
+    
     table {
         font-size: 0.75rem;
     }
@@ -197,6 +212,56 @@ td {
     .online-badge {
         font-size: 0.8rem;
         padding: 0.2rem 0.4rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .manage-container {
+        padding: 0.6rem;
+        margin: 0.75rem auto;
+    }
+    
+    .card {
+        padding: 0.9rem;
+        margin-bottom: 1.2rem;
+        border-radius: 12px;
+    }
+    
+    .card h2 {
+        font-size: 1.1rem;
+        margin-bottom: 0.8rem;
+    }
+    
+    input {
+        padding: 0.7rem !important;
+        margin-bottom: 0.7rem !important;
+        font-size: 0.95rem !important;
+        min-height: 44px !important;
+    }
+    
+    .btn {
+        width: 100%;
+        padding: 0.7rem !important;
+        font-size: 0.9rem;
+        margin-top: 0.8rem;
+        min-height: 44px;
+    }
+    
+    table {
+        font-size: 0.7rem;
+    }
+
+    th, td {
+        padding: 0.4rem 0.2rem;
+    }
+    
+    .action-cell {
+        flex-direction: column;
+        gap: 0.3rem;
+    }
+    
+    .action-cell button, .action-cell a button {
+        width: 100%;
     }
 }
 

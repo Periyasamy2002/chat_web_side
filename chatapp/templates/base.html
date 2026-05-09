@@ -23,6 +23,14 @@
             background: #050816;
             color: white;
             overflow-x: hidden;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html {
+            max-width: 100%;
+            overflow-x: hidden;
         }
 
         /* ================= BACKGROUND ================= */
@@ -302,7 +310,7 @@
             border-radius: 10px;
         }
 
-        
+      
 
         /* ================= CHAT ================= */
         .chat-wrapper {
@@ -440,11 +448,11 @@
     </nav>
 
     <!-- CHAT -->
-    <div class="chat-wrapper">
+    
         {% block content %}
         {% endblock %}
 
-    </div>
+ 
 
     <script>
         function toggleMenu() {

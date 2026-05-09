@@ -13,6 +13,7 @@
         border: 1.5px solid rgba(102, 126, 234, 0.3);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
         animation: slideInUp 0.6s ease-out;
+        box-sizing: border-box;
     }
 
     @keyframes slideInUp {
@@ -184,13 +185,14 @@
 
     @media (max-width: 480px) {
         .chat-container {
-            margin: 1rem auto;
-            padding: 0.9rem;
+            margin: 1rem 0.75rem;
+            padding: 1rem;
             border-radius: 12px;
+            max-width: calc(100% - 1.5rem);
         }
 
         .chat-header h2 {
-            font-size: 1.3rem;
+            font-size: 1.4rem;
         }
 
         .form-group {
