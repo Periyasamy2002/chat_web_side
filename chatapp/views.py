@@ -62,6 +62,65 @@ def ensure_session(request):
     return request.session.session_key
 
 
+def file_exists_safely(file_field):
+    """
+    Safely check if a file field's file actually exists.
+    Returns True only if file exists, handles all edge cases.
+    """
+    if not file_field or not file_field.name:
+        return False
+    
+    try:
+        # Check via storage
+        if hasattr(file_field, 'storage'):
+            return file_field.storage.exists(file_field.name)
+        # Fallback: check filesystem
+        if hasattr(file_field, 'path'):
+            return os.path.exists(file_field.path)
+    except Exception as e:
+        logger.warning(f"Error checking file existence for {file_field.name}: {str(e)}")
+    
+    return False
+
+
+def get_audio_url_safely(message):
+    """
+    Safely get audio URL from message, returns None if file doesn't exist.
+    Prevents 404 errors when files are missing on ephemeral filesystems.
+    """
+    if not message or not message.audio_file:
+        return None
+    
+    try:
+        # Check if file actually exists before returning URL
+        if file_exists_safely(message.audio_file):
+            return message.audio_file.url
+        else:
+            logger.warning(f"Audio file missing for message {message.id}: {message.audio_file.name}")
+            return None
+    except Exception as e:
+        logger.warning(f"Error getting audio URL for message {message.id}: {str(e)}")
+        return None
+
+
+def get_translation_audio_url_safely(translation):
+    """
+    Safely get audio URL from translation, returns None if file doesn't exist.
+    """
+    if not translation or not translation.audio_file:
+        return None
+    
+    try:
+        if file_exists_safely(translation.audio_file):
+            return translation.audio_file.url
+        else:
+            logger.warning(f"Audio file missing for translation {translation.id}: {translation.audio_file.name}")
+            return None
+    except Exception as e:
+        logger.warning(f"Error getting translation audio URL {translation.id}: {str(e)}")
+        return None
+
+
 def delete_file_field(file_field):
     """Delete a file field from storage and filesystem."""
     if not file_field:
@@ -79,7 +138,6 @@ def delete_file_field(file_field):
         # Also try to delete from filesystem directly as backup
         if hasattr(file_field, 'path'):
             try:
-                import os
                 if os.path.exists(file_field.path):
                     os.remove(file_field.path)
                     logger.info(f"Deleted file from filesystem: {file_field.path}")
@@ -907,7 +965,7 @@ def group(request, code):
             'session_id': msg.session_id,
             'is_deleted': msg.is_deleted,
             'audio_file': msg.audio_file,
-            'audio_url': msg.audio_file.url if msg.audio_file else None,
+            'audio_url': get_audio_url_safely(msg),
             'audio_mime_type': msg.audio_mime_type or 'audio/webm',
             'duration': msg.duration
         }
@@ -2257,7 +2315,7 @@ def upload_voice_message(request, code):
                 'source_text': source_text,
                 'translated_text': message.translated_content,
                 'english_text': english_text,
-                'audio_url': message.audio_file.url if message.audio_file else None,
+                'audio_url': get_audio_url_safely(message),
                 'message_type': 'voice',
                 'timestamp': message.timestamp.isoformat(),
                 'is_sender': True,
@@ -2502,7 +2560,7 @@ def get_new_messages(request, code):
                 
                 if msg_obj.message_type == 'voice':
                     # Audio is already attached to the message
-                    msg_data['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else None
+                    msg_data['audio_url'] = get_audio_url_safely(msg_obj)
                     msg_data['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/mpeg'
                     msg_data['duration'] = msg_obj.duration
                 
@@ -2892,7 +2950,7 @@ def synthesize_voice_message(request, code):
         return JsonResponse({
             'success': True,
             'message_id': message.id,
-            'audio_url': message.audio_file.url,
+            'audio_url': get_audio_url_safely(message),
             'audio_mime_type': message.audio_mime_type,
             'duration': estimated_duration,
             'synthesis_msg': synth_msg
@@ -2993,7 +3051,7 @@ def load_more_messages(request, code):
                         user_translation = ensure_message_translation_for_language(msg_obj, user_language_mode)
 
                     if user_translation and user_translation.audio_file:
-                        msg_data['audio_url'] = user_translation.audio_file.url
+                        msg_data['audio_url'] = get_translation_audio_url_safely(user_translation)
                         msg_data['audio_mime_type'] = user_translation.audio_mime_type or 'audio/mpeg'
                         print(f"[VOICE LOAD_MORE] Using {user_language_mode} audio for message {msg_obj.id}")
                     elif user_language_mode != 'english':
@@ -3007,7 +3065,7 @@ def load_more_messages(request, code):
                             english_translation = ensure_message_translation_for_language(msg_obj, 'english')
 
                         if english_translation and english_translation.audio_file:
-                            msg_data['audio_url'] = english_translation.audio_file.url
+                            msg_data['audio_url'] = get_translation_audio_url_safely(english_translation)
                             msg_data['audio_mime_type'] = english_translation.audio_mime_type or 'audio/mpeg'
                             print(f"[VOICE LOAD_MORE] Using English fallback for message {msg_obj.id}")
                         else:
