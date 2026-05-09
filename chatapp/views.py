@@ -3060,7 +3060,7 @@ def admin_register_view(request):
             error = "❌ Invalid or missing admin registration key"
     
     # Check admin limit with transaction safety
-    if superuser_count >= 3:
+    if superuser_count >= 2:
         return render(request, "admin_register.html", {
             "error": "❌ Admin limit reached (only 3 allowed)",
             "superuser_count": superuser_count
@@ -3082,57 +3082,57 @@ def admin_register_view(request):
             })
 
         username = request.POST.get("username", "").strip()
-    email = request.POST.get("email", "").strip()
-    password = request.POST.get("password", "").strip()
-    password_confirm = request.POST.get("password_confirm", "").strip()
+        email = request.POST.get("email", "").strip()
+        password = request.POST.get("password", "").strip()
+        password_confirm = request.POST.get("password_confirm", "").strip()
 
-    # Validation
-    if not username or not email or not password or not password_confirm:
-        error = "⚠️ All fields are required"
-    elif len(username) < 3:
-        error = "⚠️ Username must be at least 3 characters"
-    elif len(password) < 8:
-        error = "⚠️ Password must be at least 8 characters"
-    elif password != password_confirm:
-        error = "⚠️ Passwords don't match"
-    elif not email or '@' not in email:
-        error = "⚠️ Valid email required"
-    elif User.objects.filter(username=username).exists():
-        error = "⚠️ Username already exists"
-    elif User.objects.filter(email=email).exists():
-        error = "⚠️ Email already exists"
-    else:
-        # RACE CONDITION FIX: Use transaction.atomic()
-        from django.db import transaction
-        try:
-            with transaction.atomic():
-                # Recheck count inside transaction
-                current_count = User.objects.filter(is_superuser=True).count()
-                if current_count >= 3:
-                    raise ValueError("Admin limit reached during registration")
-                
-                # ✅ Create Django superuser with proper password hashing
-                user = User.objects.create_superuser(
-                    username=username,
-                    email=email,
-                    password=password
-                )
-                logger.info(f"[SUCCESS] New superuser created: {username} ({email})")
-                
-                success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
-                messages.success(request, f"Admin account created! You can now login with username '{username}'")
-                
-                # Redirect to login after 2 seconds (JS in template)
-                return render(request, "admin_register.html", {
-                    "success": success,
-                    "superuser_count": current_count + 1,
-                    "redirect": True
-                })
-        except ValueError as ve:
-            error = f"❌ {str(ve)}"
-        except Exception as e:
-            logger.error(f"❌ Error creating admin: {str(e)}")
-            error = f"❌ Error creating admin: {str(e)}"
+        # Validation
+        if not username or not email or not password or not password_confirm:
+            error = "⚠️ All fields are required"
+        elif len(username) < 3:
+            error = "⚠️ Username must be at least 3 characters"
+        elif len(password) < 8:
+            error = "⚠️ Password must be at least 8 characters"
+        elif password != password_confirm:
+            error = "⚠️ Passwords don't match"
+        elif not email or '@' not in email:
+            error = "⚠️ Valid email required"
+        elif User.objects.filter(username=username).exists():
+            error = "⚠️ Username already exists"
+        elif User.objects.filter(email=email).exists():
+            error = "⚠️ Email already exists"
+        else:
+            # RACE CONDITION FIX: Use transaction.atomic()
+            from django.db import transaction
+            try:
+                with transaction.atomic():
+                    # Recheck count inside transaction
+                    current_count = User.objects.filter(is_superuser=True).count()
+                    if current_count >= 3:
+                        raise ValueError("Admin limit reached during registration")
+                    
+                    # ✅ Create Django superuser with proper password hashing
+                    user = User.objects.create_superuser(
+                        username=username,
+                        email=email,
+                        password=password
+                    )
+                    logger.info(f"[SUCCESS] New superuser created: {username} ({email})")
+                    
+                    success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
+                    messages.success(request, f"Admin account created! You can now login with username '{username}'")
+                    
+                    # Redirect to login after 2 seconds (JS in template)
+                    return render(request, "admin_register.html", {
+                        "success": success,
+                        "superuser_count": current_count + 1,
+                        "redirect": True
+                    })
+            except ValueError as ve:
+                error = f"❌ {str(ve)}"
+            except Exception as e:
+                logger.error(f"❌ Error creating admin: {str(e)}")
+                error = f"❌ Error creating admin: {str(e)}"
             
     return render(request, "admin_register.html", {
         "error": error,
