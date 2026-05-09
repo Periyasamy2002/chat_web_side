@@ -112,7 +112,10 @@ class Message(models.Model):
     # Bilingual audio support for voice messages
     audio_file_english = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='English version of voice message')
     audio_file_tamil = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Tamil version of voice message')
-    
+    audio_file_hindi = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Hindi version of voice message')
+    audio_file_malayalam = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Malayalam version of voice message')
+    audio_file_kannada = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Kannada version of voice message')
+
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     duration = models.FloatField(default=0)
     
@@ -160,6 +163,27 @@ class Message(models.Model):
         return self.content
 
 
+class TranslationCache(models.Model):
+    """Cached Gemini translations for reuse across requests."""
+    source_hash = models.CharField(max_length=64, db_index=True)
+    source_language = models.CharField(max_length=50, blank=True, default='auto')
+    target_language = models.CharField(max_length=50)
+    source_text = models.TextField(blank=True, null=True)
+    translated_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('source_hash', 'source_language', 'target_language')
+        indexes = [
+            models.Index(fields=['source_hash', 'source_language', 'target_language']),
+            models.Index(fields=['last_used_at']),
+        ]
+
+    def __str__(self):
+        return f"TranslationCache({self.source_language}->{self.target_language})"
+
+
 class GroupMember(models.Model):
     """Track group membership"""
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='members')
@@ -178,12 +202,33 @@ class GroupMember(models.Model):
         return f"{self.session_id} in {self.group.code}"
 
 
+class MessageTranslation(models.Model):
+    """Dynamic per-language translations and audio for messages."""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='message_translations')
+    language = models.CharField(max_length=50, help_text='Target language (e.g., english, tamil, hindi)')
+    translated_text = models.TextField(blank=True, null=True, help_text='Translated text content')
+    audio_file = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Audio file for this language')
+    audio_mime_type = models.CharField(max_length=50, default='audio/mpeg', help_text='MIME type of audio file')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('message', 'language')
+        indexes = [
+            models.Index(fields=['message', 'language']),
+            models.Index(fields=['language']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"MessageTranslation({self.message.id}, {self.language})"
+
+
 class DeletedMessage(models.Model):
     """Track user-specific message deletions"""
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='deletions')
     session_id = models.CharField(max_length=255)
     deleted_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         unique_together = ('message', 'session_id')
         indexes = [

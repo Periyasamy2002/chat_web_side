@@ -187,12 +187,12 @@ def translate_message_for_user(english_message, target_language_mode):
     try:
         success, translated_text, msg = translate_text(english_message, target_lang_name, source_language='auto')
         if success and translated_text:
-            logger.info(f"Final Display: {translated_text}")
+            logger.info(f"Final Display: {translated_text[:100]}")  # Limit length for logging
             logger.info(f"[OK] Translated to {target_lang_name}: {english_message[:40]}... -> {translated_text[:40]}...")
             return translated_text
         else:
             logger.warning(f"[FAIL] Translation to {target_lang_name} failed: {msg}")
             return english_message
     except Exception as e:
-        logger.error(f"[ERROR] Translation exception to {target_lang_name}: {e}")
+        logger.error(f"[ERROR] Translation exception to {target_lang_name}: {e}", exc_info=True)
         return english_message

@@ -2,121 +2,456 @@
 
 {% block content %}
 <style>
-    .manage-container { max-width: 900px; margin: 2rem auto; padding: 1rem; color: white; }
-    .card { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 15px; padding: 1.5rem; border: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 2rem; }
-    .form-group { margin-bottom: 1rem; }
-    .form-group label { display: block; margin-bottom: 0.5rem; }
-    .form-group input { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; background: rgba(255, 255, 255, 0.2); color: white; }
-    .btn { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
-    .btn-primary { background: #4CAF50; color: white; }
-    .btn-danger { background: #f44336; color: white; font-size: 0.8rem; padding: 0.4rem 0.8rem; }
-    
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: rgba(0,0,0,0.2); border-radius: 10px; overflow: hidden; }
-    th, td { padding: 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    th { background: rgba(102, 126, 234, 0.4); }
-    tr:hover { background: rgba(255,255,255,0.05); }
-    .status-online { color: #4CAF50; font-weight: bold; }
-    .expiry-timer { font-family: monospace; color: #f093fb; font-weight: bold; }
-    .expired-text { color: #f44336; font-weight: bold; }
+
+.manage-container {
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 1rem;
+    color: white;
+}
+
+.card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border-radius: 15px;
+    padding: 1.5rem;
+    border: 1px solid rgba(255,255,255,0.15);
+    margin-bottom: 2rem;
+}
+
+input {
+    width: 100%;
+    padding: 0.8rem;
+    margin-top: 0.5rem;
+    border-radius: 10px;
+    border: none;
+    outline: none;
+}
+
+.btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    margin-top: 1rem;
+}
+
+.btn-primary { background: #4CAF50; color: white; }
+.btn-danger { background: #f44336; color: white; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+}
+
+th, td {
+    padding: 1rem 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    text-align: left;
+}
+
+.table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+th {
+    background: rgba(102,126,234,0.4);
+    font-weight: bold;
+}
+
+td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.share-btn {
+    background: #5c6ac4;
+    color: white;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* SHARE PANEL */
+.share-panel {
+    display: none;
+    background: rgba(255,255,255,0.08);
+    border-radius: 15px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.share-panel.active {
+    display: block;
+}
+
+.share-input {
+    width: 100%;
+    padding: 0.8rem;
+    border-radius: 10px;
+    border: none;
+    margin-top: 10px;
+    background: rgba(255,255,255,0.1);
+    color: white;
+}
+
+.share-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.share-actions button {
+    flex: 1;
+    min-width: 100px;
+    padding: 10px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    background: #667eea;
+    color: white;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+.share-actions button:hover {
+    background: #5568d3;
+}
+
+.online-badge {
+    background: rgba(76, 175, 80, 0.3);
+    padding: 0.3rem 0.6rem;
+    border-radius: 12px;
+    font-weight: bold;
+}
+
+.time-text {
+    display: block;
+    font-weight: bold;
+}
+
+.countdown {
+    display: block;
+    padding: 0.3rem 0.6rem;
+    background: rgba(255, 152, 0, 0.3);
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
+.countdown.expiring {
+    background: rgba(244, 67, 54, 0.3);
+    color: #ff9800;
+}
+
+/* MOBILE RESPONSIVE */
+@media (max-width: 768px) {
+    table {
+        font-size: 0.75rem;
+    }
+
+    th, td {
+        padding: 0.5rem 0.3rem;
+    }
+
+    .share-btn, button[style*="background:#f44336"] {
+        padding: 0.4rem 0.6rem !important;
+        font-size: 0.75rem;
+    }
+
+    .time-text {
+        font-size: 0.8rem;
+    }
+
+    .countdown {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.4rem;
+    }
+
+    .online-badge {
+        font-size: 0.8rem;
+        padding: 0.2rem 0.4rem;
+    }
+}
+
+/* ANIMATIONS */
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
 </style>
 
 <div class="manage-container">
+
+    <!-- CREATE GROUP -->
     <div class="card">
-        <h2>🆕 Create New Group</h2>
-        <p>Initialize a new chat room. Users can only join after you create it here.</p>
-        
-        {% if error %}
-        <div style="color: #ffcdd2; background: rgba(244, 67, 54, 0.2); padding: 0.5rem; border-radius: 5px; margin-bottom: 1rem;">
-            {{ error }}
-        </div>
-        {% endif %}
+        <h2>🆕 Create Group</h2>
 
         <form method="POST">
             {% csrf_token %}
-            <div class="form-group">
-                <label>Group Code (Required)</label>
-                <input type="text" name="code" placeholder="e.g. WORK2024" required>
-            </div>
-            <div class="form-group">
-                <label>Group Display Name (Optional)</label>
-                <input type="text" name="name" placeholder="e.g. Office Team">
-            </div>
-            <button type="submit" class="btn btn-primary">➕ Create Group</button>
+            <input type="text" name="code" placeholder="Group Code" required>
+            <input type="text" name="name" placeholder="Group Name">
+
+            <button class="btn btn-primary" type="submit">
+                Create Group
+            </button>
         </form>
     </div>
 
+    <!-- GROUP LIST -->
     <div class="card">
-        <h2>📋 Active Groups</h2>
-        <p>Monitor current workflow, message counts, and active users.</p>
-        
-        <table>
+        <h2>📋 Groups</h2>
+
+        <div class="table-responsive">
+            <table>
             <thead>
                 <tr>
-                    <th>Group Name</th>
-                    <th>Owner</th>
-                    <th>Messages</th>
-                    <th>Online</th>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Created By</th>
+                    <th>Online Users</th>
+                    <th>Created Time</th>
                     <th>Expires In</th>
-                    <th>Last Active</th>
                     <th>Action</th>
                 </tr>
             </thead>
+
             <tbody>
                 {% for g in groups %}
                 <tr>
                     <td>{{ g.name }}</td>
-                    <td><small>{{ g.owner }}</small><br><code>{{ g.code }}</code></td>
-                    <td>{{ g.message_count }}</td>
-                    <td><span class="status-online">{{ g.online_count }}</span></td>
-                    <td><span class="expiry-timer" data-expiry="{{ g.expiry_iso }}">--:--:--</span></td>
-                    <td>{{ g.last_activity|date:"d M, H:i" }}</td>
+                    <td><strong>{{ g.code }}</strong></td>
+                    <td>{{ g.owner }}</td>
+                    <td><span class="online-badge">{{ g.online_count }} 🟢</span></td>
                     <td>
-                        <a href="{% url 'delete_group_entirely' g.code %}"
-                           class="btn btn-danger" 
-                           onclick="return confirm('Delete this group and all messages?')">🗑️ Delete</a>
+                        <span class="time-text">{{ g.created_at|date:"H:i" }}</span>
+                        <small style="opacity:0.7;">{{ g.created_at|date:"d M" }}</small>
                     </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="6" style="text-align: center;">No groups created yet.</td>
+                    <td>
+                        <span class="countdown" data-expiry="{{ g.expiry_iso }}">--</span>
+                    </td>
+                    <td>
+                        <button class="share-btn" data-code="{{ g.code }}" data-name="{{ g.name }}">
+                            🔗 Share
+                        </button>
+                        <a href="{% url 'delete_group_entirely' g.code %}" style="margin-left:5px;">
+                            <button type="button" style="background:#f44336;color:white;border:none;padding:0.5rem 0.9rem;border-radius:8px;cursor:pointer;font-weight:bold;">
+                                🗑️ Delete
+                            </button>
+                        </a>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+            </table>
+        </div>
     </div>
-    
-    <div style="text-align: center;">
-        <a href="{% url 'chat' %}" style="color: white; text-decoration: none;">← Back to Join Page</a>
+
+    <!-- SHARE PANEL -->
+    <div id="sharePanel" class="share-panel">
+
+        <h3>🔗 Share Group Link</h3>
+
+        <p><b>Group:</b> <span id="groupName"></span> <code id="groupCode" style="background:rgba(255,255,255,0.1);padding:0.2rem 0.5rem;border-radius:5px;margin-left:10px;"></code></p>
+
+        <label style="display:block;margin-top:10px;opacity:0.8;">Group Link:</label>
+        <input id="shareLink" class="share-input" readonly>
+
+        <div style="text-align:center;margin-top:15px;">
+            <label style="display:block;margin-bottom:10px;opacity:0.8;">QR Code:</label>
+            <img id="qrImg" style="width:200px;height:200px;border-radius:12px;background:white;padding:10px;">
+        </div>
+
+        <div class="share-actions">
+            <button id="copyBtn" title="Copy link to clipboard">📋 Copy Link</button>
+            <button id="shareBtn" title="Share via email, messaging apps, etc.">📤 Share</button>
+            <button id="closeBtn" style="background:#f44336;">✕ Close</button>
+        </div>
+
     </div>
+
 </div>
 
 <script>
-    function updateCountdowns() {
+
+// ======== COUNTDOWN TIMER ========
+function updateCountdowns() {
+    document.querySelectorAll(".countdown").forEach(el => {
+        const expiryTime = new Date(el.dataset.expiry);
         const now = new Date();
-        document.querySelectorAll('.expiry-timer').forEach(timer => {
-            const expiryDate = new Date(timer.dataset.expiry);
-            const timeLeft = expiryDate - now;
+        const diff = expiryTime - now;
 
-            if (timeLeft <= 0) {
-                timer.innerHTML = '<span class="expired-text">Expired</span>';
-                // Optional: Auto-hide the row if expired
-                const row = timer.closest('tr');
-                if (row) row.style.opacity = '0.5';
-            } else {
-                const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+        if (diff <= 0) {
+            el.textContent = "⏰ Deleting...";
+            el.classList.add("expiring");
+            
+            // Get the group code from the table row
+            const row = el.closest("tr");
+            const codeCell = row.querySelector("td:nth-child(2)"); // Code is in 2nd column
+            const groupCode = codeCell.textContent.trim();
+            
+            // Auto-delete the group and all its data
+            deleteGroupAuto(groupCode, row);
+            return;
+        }
 
-                timer.textContent = 
-                    (hours < 10 ? '0' : '') + hours + ":" + 
-                    (minutes < 10 ? '0' : '') + minutes + ":" + 
-                    (seconds < 10 ? '0' : '') + seconds;
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+        el.textContent = `${hours}h ${minutes}m ${seconds}s`;
+
+        if (hours === 0 && minutes < 30) {
+            el.classList.add("expiring");
+        }
+    });
+}
+
+// Auto-delete group when timer expires
+function deleteGroupAuto(groupCode, rowElement) {
+    fetch(`/group-delete/${groupCode}/`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        console.log(`Group '${groupCode}' auto-deleted:`, response.status);
+        
+        // Animate row deletion
+        rowElement.style.transition = 'opacity 0.5s ease';
+        rowElement.style.opacity = '0';
+        
+        setTimeout(() => {
+            rowElement.remove();
+            
+            // Show notification
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: rgba(76, 175, 80, 0.9);
+                color: white;
+                padding: 1rem;
+                border-radius: 8px;
+                z-index: 9999;
+                font-weight: bold;
+                animation: slideIn 0.3s ease;
+            `;
+            notification.textContent = `✅ Group '${groupCode}' auto-deleted (expired)`;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }, 500);
+    })
+    .catch(error => {
+        console.error(`Failed to auto-delete group '${groupCode}':`, error);
+    });
+}
+
+// Update every 1 second for real-time display
+setInterval(updateCountdowns, 1000);
+updateCountdowns(); // Initial call
+
+// ======== SHARE PANEL ========
+const panel = document.getElementById("sharePanel");
+const linkInput = document.getElementById("shareLink");
+const qrImg = document.getElementById("qrImg");
+const groupName = document.getElementById("groupName");
+const groupCode = document.getElementById("groupCode");
+
+// SHARE BUTTON CLICK
+document.querySelectorAll(".share-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        const code = btn.dataset.code;
+        const name = btn.dataset.name;
+        const url = `${window.location.origin}/chat/?code=${code}`;
+
+        groupName.innerText = name;
+        groupCode.innerText = code;
+        linkInput.value = url;
+
+        // ✅ QR CODE GENERATION
+        const qrApi = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=";
+        qrImg.src = qrApi + encodeURIComponent(url);
+
+        panel.classList.add("active");
+    });
+});
+
+// COPY BUTTON
+document.getElementById("copyBtn").addEventListener("click", () => {
+    navigator.clipboard.writeText(linkInput.value).then(() => {
+        const btn = document.getElementById("copyBtn");
+        const originalText = btn.textContent;
+        btn.textContent = "✅ Copied!";
+        setTimeout(() => {
+            btn.textContent = originalText;
+        }, 2000);
+    }).catch(() => {
+        alert("Failed to copy. Please try again.");
+    });
+});
+
+// SHARE BUTTON (Web Share API)
+document.getElementById("shareBtn").addEventListener("click", () => {
+    const url = linkInput.value;
+    const title = `Join Group: ${groupName.innerText}`;
+    const text = `Scan QR or click to join: ${groupName.innerText}`;
+
+    if (navigator.share) {
+        navigator.share({
+            title: title,
+            text: text,
+            url: url
+        }).catch(err => {
+            if (err.name !== "AbortError") {
+                console.log("Share failed:", err);
+                alert("Share failed. Please try copying the link instead.");
             }
         });
+    } else {
+        // Fallback: Just copy the link
+        navigator.clipboard.writeText(url).then(() => {
+            alert("Copied! You can now paste the link.");
+        });
     }
+});
 
-    // Update every second
-    setInterval(updateCountdowns, 1000);
-    updateCountdowns(); // Initial call
+// CLOSE PANEL
+document.getElementById("closeBtn").addEventListener("click", () => {
+    panel.classList.remove("active");
+});
+
 </script>
+
 {% endblock %}

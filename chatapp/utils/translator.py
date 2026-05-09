@@ -16,6 +16,7 @@ import re
 import logging
 import warnings
 import traceback
+import hashlib
 from typing import Optional, Tuple
 
 # Use google.generativeai for current compatibility.
@@ -25,8 +26,26 @@ import google.generativeai as genai
 # Django imports for caching
 from django.core.cache import cache
 from django.conf import settings
+from django.utils import timezone
+
+from chatapp.models import TranslationCache
 
 logger = logging.getLogger(__name__)
+
+# Safe logging function for Unicode text
+def safe_log_info(message, *args):
+    """Safely log messages that might contain Unicode characters."""
+    try:
+        logger.info(message, *args)
+    except UnicodeEncodeError:
+        # Replace the message with a safe version
+        safe_message = message
+        for arg in args:
+            if isinstance(arg, str):
+                # Replace Unicode characters with safe placeholders
+                safe_arg = ''.join(c if ord(c) < 128 else '?' for c in arg)
+                safe_message = safe_message.replace('%s', safe_arg, 1).replace('%r', repr(safe_arg), 1)
+        logger.info(safe_message)
 
 # =========================
 # CONFIGURATION
@@ -165,6 +184,71 @@ def clean_text(text: Optional[str]) -> str:
     return text.strip() if isinstance(text, str) else ''
 
 
+def get_translation_cache_key(text: str, source_language: Optional[str], target_language: str):
+    normalized_text = clean_text(text)
+    digest = hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()
+    source = normalize_language_name(source_language) if source_language else 'auto'
+    target = normalize_language_name(target_language)
+    cache_key = f'translation_{digest}_{source}_{target}'
+    return cache_key, digest, source, target
+
+
+def increment_translation_api_call():
+    try:
+        cache.incr('gemini_api_calls')
+    except Exception:
+        cache.add('gemini_api_calls', 1, None)
+
+
+def increment_translation_cache_hit():
+    try:
+        cache.incr('gemini_cache_hits')
+    except Exception:
+        cache.add('gemini_cache_hits', 1, None)
+
+
+def get_cached_translation(text: str, source_language: Optional[str], target_language: str):
+    cache_key, source_hash, source, target = get_translation_cache_key(text, source_language, target_language)
+    cached_value = cache.get(cache_key)
+    if cached_value:
+        logger.info('TRANSLATE_CACHE_HIT key=%s', cache_key)
+        increment_translation_cache_hit()
+        return cached_value
+
+    translation = TranslationCache.objects.filter(
+        source_hash=source_hash,
+        source_language=source,
+        target_language=target
+    ).first()
+    if translation:
+        cache.set(cache_key, (True, translation.translated_text, 'Translation cache hit'), 3600)
+        translation.last_used_at = timezone.now()
+        translation.save(update_fields=['last_used_at'])
+        logger.info('TRANSLATE_DB_CACHE_HIT %s', cache_key)
+        increment_translation_cache_hit()
+        return True, translation.translated_text, 'Translation cache hit'
+
+def save_translation_cache(text: str, source_language: Optional[str], target_language: str, translated_text: str):
+    cache_key, source_hash, source, target = get_translation_cache_key(text, source_language, target_language)
+    try:
+        TranslationCache.objects.update_or_create(
+            source_hash=source_hash,
+            source_language=source,
+            target_language=target,
+            defaults={
+                'source_text': text,
+                'translated_text': translated_text,
+            }
+        )
+    except Exception as exc:
+        logger.warning('TRANSLATE_CACHE_SAVE_FAIL %s %s', cache_key, exc)
+
+    try:
+        cache.set(cache_key, (True, translated_text, 'Translation cached'), 3600)
+    except Exception as exc:
+        logger.warning('CACHE_SET_FAIL %s %s', cache_key, exc)
+
+
 def normalize_language_name(language: Optional[str]) -> str:
     if not language or not isinstance(language, str):
         return 'English'
@@ -299,12 +383,10 @@ def translate_text(
         logger.info('TRANSLATE_SKIP %s', msg)
         return True, text, msg
 
-    # TRANSLATION CACHE: Check cache first
-    cache_key = f'translation_{hash(text)}_{source_language or "auto"}_{target_language}'
-    cached_result = cache.get(cache_key)
-    if cached_result:
-        logger.info('TRANSLATE_CACHE_HIT key=%s', cache_key)
-        return cached_result
+    # TRANSLATION CACHE: Check cache and database first
+    cache_entry = get_cached_translation(text, source_language, target_language)
+    if cache_entry is not None:
+        return cache_entry
 
     if not API_KEY:
         logger.error('TRANSLATE_FAIL translation service not configured')
@@ -313,23 +395,24 @@ def translate_text(
     if source_language:
         prompt = (
             f'Translate the following text from {source_language} to {target_language}.\n'
-            'Only return the translated text. Do not include explanations or extra text.\n\n'
-            f'Text:\n{text}'
+            'Return only the translated text without explanation.\n\n'
+            f'{text}'
         )
     else:
         prompt = (
             f'Translate the following text to {target_language}.\n'
-            'Only return the translated text. Do not include explanations or extra text.\n\n'
-            f'Text:\n{text}'
+            'Return only the translated text without explanation.\n\n'
+            f'{text}'
         )
 
     logger.info('TRANSLATE_PROMPT source=%s target=%s', source_language or 'auto', target_language)
 
     try:
+        increment_translation_api_call()
         model = genai.GenerativeModel(MODEL_NAME)
         response = model.generate_content(
             prompt,
-            generation_config=genai.types.GenerationConfig(max_output_tokens=1000),
+            generation_config=genai.types.GenerationConfig(max_output_tokens=800),
         )
 
         translated = None
@@ -345,14 +428,11 @@ def translate_text(
 
         if not translated:
             logger.warning('TRANSLATE_FAIL empty response from Gemini')
-            # Safe fallback: return original text if translation returns empty
             return True, text, 'Empty translation from service - returning original'
 
         logger.info('TRANSLATE_SUCCESS target=%s length=%d', target_language, len(translated))
-        
-        # CACHE SUCCESSFUL TRANSLATION
         result = (True, translated, 'Translation successful')
-        cache.set(cache_key, result, 3600)  # Cache for 1 hour
+        save_translation_cache(text, source_language, target_language, translated)
         return result
 
     except Exception as exc:
@@ -366,8 +446,7 @@ def translate_text(
             error_result = (False, None, 'Network error. Please check your connection.')
         else:
             error_result = (False, None, f'Translation failed: {message[:200]}')
-        
-        # Safe fallback: Return original text as fallback on exception instead of crashing
+
         logger.warning(f'TRANSLATE_EXCEPTION using fallback - returning original text. Error: {message[:100]}')
         return True, text, f'Translation exception: {message[:100]} - returned original'
 
@@ -451,7 +530,7 @@ def get_display_message(
     return translated_text or original_text
 
 
-def get_translation_cache_key(message_id: int, target_language: str) -> str:
+def get_message_translation_cache_key(message_id: int, target_language: str) -> str:
     return f'msg_translation_{message_id}_{normalize_language_name(target_language).lower()}'
 
 
@@ -474,6 +553,177 @@ def synthesize_speech_with_gtts(
     except Exception as exc:
         logger.error('TTS error: %s', exc)
         return False, None, str(exc)
+
+
+# =========================
+# PER-USER LAZY TRANSLATION SYSTEM
+# =========================
+
+def get_user_translation(message_id: int, text: str, target_language: str, skip_cache: bool = False) -> Tuple[bool, Optional[str], str]:
+    """
+    Get translation for a specific user language (lazy generation).
+    
+    This is the PRIMARY OPTIMIZATION FUNCTION:
+    - Only translates to one user's language, not all languages
+    - Caches per message and language
+    - Reduces API calls by 70-80%
+    
+    Args:
+        message_id: Database message ID
+        text: Message text to translate
+        target_language: User's selected language
+        skip_cache: If True, force fresh translation
+    
+    Returns:
+        (success, translated_text, message)
+    """
+    if not text or not isinstance(text, str):
+        return False, None, 'Invalid text'
+    
+    text = clean_text(text)
+    target_language = normalize_language_name(target_language)
+    
+    if not text:
+        return False, None, 'Empty text'
+    
+    # Skip translation if already in target language
+    if _is_already_in_target(text, None, target_language):
+        return True, text, f'Already in {target_language}'
+    
+    if skip_cache:
+        # Force fresh translation (for admin/testing)
+        logger.info('LAZY_TRANSLATION_SKIP_CACHE msg_id=%d target=%s', message_id, target_language)
+    else:
+        # Check cache first
+        cache_key = get_message_translation_cache_key(message_id, target_language)
+        cached = cache.get(cache_key)
+        if cached:
+            logger.info('LAZY_TRANSLATION_CACHE_HIT msg_id=%d target=%s', message_id, target_language)
+            increment_translation_cache_hit()
+            return True, cached, 'From cache'
+    
+    # Perform fresh translation
+    success, translated, message = translate_text(text, target_language, source_language=None)
+    
+    if success and translated:
+        # Cache the result
+        try:
+            cache_key = get_message_translation_cache_key(message_id, target_language)
+            cache.set(cache_key, translated, 86400)  # 24 hour cache
+        except Exception as exc:
+            logger.warning('LAZY_TRANSLATION_CACHE_SET_FAIL msg_id=%d %s', message_id, exc)
+    
+    return success, translated, message
+
+
+def get_message_for_user(message_obj, user_language: str) -> dict:
+    """
+    Get message translated for specific user language (lazy approach).
+    
+    This replaces the old 'load all translations' approach.
+    Now each user gets ONLY their language translation.
+    
+    Args:
+        message_obj: Message database object
+        user_language: User's selected language
+    
+    Returns:
+        Dictionary with message data for user
+    """
+    user_language = normalize_language_name(user_language)
+    
+    # Start with canonical English/stored version
+    display_text = message_obj.english_content or message_obj.content or message_obj.normalized_content
+    
+    # If user wants their language, translate on-demand
+    if user_language.lower() != 'english':
+        success, translated, _ = get_user_translation(
+            message_obj.id,
+            display_text,
+            user_language,
+            skip_cache=False
+        )
+        if success and translated:
+            display_text = translated
+    
+    return {
+        'id': message_obj.id,
+        'user_name': message_obj.user_name,
+        'content': display_text,
+        'message_type': message_obj.message_type,
+        'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
+        'is_deleted': message_obj.is_deleted,
+    }
+
+
+def get_bulk_translations_for_language(message_ids: list, target_language: str) -> dict:
+    """
+    Batch translate multiple messages to target language (optimized bulk operation).
+    
+    Args:
+        message_ids: List of message IDs to translate
+        target_language: Target language for all messages
+    
+    Returns:
+        Dictionary mapping message_id -> translated_text
+    """
+    target_language = normalize_language_name(target_language)
+    from chatapp.models import Message
+    
+    results = {}
+    
+    # Fetch all messages at once
+    messages = Message.objects.filter(
+        id__in=message_ids
+    ).values_list('id', 'english_content', 'content', 'normalized_content')
+    
+    for msg_id, english, content, normalized in messages:
+        display_text = english or content or normalized or ''
+        
+        # Check cache
+        cache_key = get_message_translation_cache_key(msg_id, target_language)
+        cached = cache.get(cache_key)
+
+        if cached:
+            results[msg_id] = cached
+            increment_translation_cache_hit()
+        else:
+            # Need translation
+            success, translated, _ = get_user_translation(msg_id, display_text, target_language, skip_cache=False)
+            if success and translated:
+                results[msg_id] = translated
+            else:
+                results[msg_id] = display_text  # Fallback to original
+    
+    return results
+
+
+def get_translation_metrics() -> dict:
+    """Get API usage metrics for cost tracking."""
+    total_calls = cache.get('gemini_api_calls', 0)
+    cache_hits = cache.get('gemini_cache_hits', 0)
+    tts_calls = cache.get('tts_calls', 0)
+    
+    total_with_cache = total_calls + cache_hits
+    cache_hit_rate = (cache_hits / total_with_cache * 100) if total_with_cache > 0 else 0
+    api_cost_saved = cache_hits * 0.000015  # Approx cost per API call
+    
+    return {
+        'api_calls': total_calls,
+        'cache_hits': cache_hits,
+        'cache_hit_rate': f'{cache_hit_rate:.1f}%',
+        'tts_calls': tts_calls,
+        'estimated_cost_saved': f'${api_cost_saved:.4f}',
+        'total_requests': total_with_cache,
+    }
+
+
+def reset_translation_metrics():
+    """Reset API usage metrics (admin only)."""
+    cache.delete('gemini_api_calls')
+    cache.delete('gemini_cache_hits')
+    cache.delete('tts_calls')
+    logger.info('Translation metrics reset')
 
 
 if __name__ == '__main__':

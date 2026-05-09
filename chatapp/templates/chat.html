@@ -137,6 +137,27 @@
         color: white;
     }
 
+    .group-summary {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 14px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        color: white;
+    }
+
+    .group-summary p {
+        margin: 0.5rem 0;
+        line-height: 1.5;
+    }
+
+    .group-summary code {
+        display: inline-block;
+        background: rgba(255,255,255,0.08);
+        padding: 0.2rem 0.5rem;
+        border-radius: 6px;
+    }
+
     @media (max-width: 768px) {
         .chat-container {
             max-width: 100%;
@@ -205,6 +226,11 @@
             margin-top: 1.2rem;
             font-size: 0.85rem;
         }
+
+        .group-summary {
+            padding: 0.8rem;
+            font-size: 0.9rem;
+        }
     }
 
     @media (hover: none) and (pointer: coarse) {
@@ -257,7 +283,7 @@
 
         <div class="form-group">
             <label for="code">Group Code</label>
-            <input type="text" id="code" name="code" placeholder="Enter valid group code" required>
+            <input type="text" id="code" name="code" value="{{ group_code }}" placeholder="Enter valid group code" required>
         </div>
 
         <div class="form-group">
@@ -289,8 +315,56 @@
 </div>
 
 <script>
+    const codeInput = document.getElementById('code');
+    const languageSelect = document.getElementById('language_mode');
+    const groupSummary = document.getElementById('groupSummary');
+    const summaryCode = document.getElementById('summaryCode');
+    const summaryName = document.getElementById('summaryName');
+    const summaryLanguage = document.getElementById('summaryLanguage');
+    let fetchTimeout = null;
 
+    function updateSummaryLanguage() {
+        const selected = languageSelect.options[languageSelect.selectedIndex];
+        summaryLanguage.textContent = selected ? selected.text : 'Not selected';
+    }
 
+    async function fetchGroupInfo(code) {
+        if (!code) {
+            groupSummary.style.display = 'none';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/group-info/${encodeURIComponent(code)}/`);
+            if (!response.ok) {
+                groupSummary.style.display = 'none';
+                return;
+            }
+
+            const data = await response.json();
+            summaryCode.textContent = data.code;
+            summaryName.textContent = data.name;
+            updateSummaryLanguage();
+            groupSummary.style.display = 'block';
+        } catch (error) {
+            groupSummary.style.display = 'none';
+        }
+    }
+
+    codeInput.addEventListener('input', () => {
+        clearTimeout(fetchTimeout);
+        fetchTimeout = setTimeout(() => fetchGroupInfo(codeInput.value.trim()), 350);
+    });
+
+    languageSelect.addEventListener('change', () => {
+        updateSummaryLanguage();
+    });
+
+    // Auto-fetch info if code is pre-filled from share link
+    document.addEventListener('DOMContentLoaded', () => {
+        const initialCode = codeInput.value.trim();
+        if (initialCode) fetchGroupInfo(initialCode);
+    });
 </script>
 
 {% endblock %}

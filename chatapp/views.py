@@ -1,10 +1,12 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 
 from chatproject import settings
 from .models import Group, Message, AnonymousUser, GroupMember, DeletedMessage, ONLINE_TIMEOUT_MINUTES, UserProfile, Language
 from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
+from django.db.models import Q
 from datetime import timedelta
 import uuid
 import logging
@@ -34,11 +36,126 @@ import google.generativeai as genai
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Constants
+
+def clean_tts_text(text):
+    """Clean text for TTS generation by removing unsupported characters while preserving Unicode."""
+    import re
+
+    if not text:
+        return ""
+
+    # Remove emojis and unsupported symbols, but preserve Hindi Unicode characters
+    # \u0900-\u097F covers Devanagari script (Hindi)
+    # \u0B80-\u0BFF covers Tamil script
+    text = re.sub(r'[^\w\s\u0900-\u097F\u0B80-\u0BFF]', '', text)
+
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
+
+
 def ensure_session(request):
     """Ensure session key exists, create if None."""
     if not request.session.session_key:
         request.session.create()
     return request.session.session_key
+
+
+def delete_file_field(file_field):
+    """Delete a file field from storage and filesystem."""
+    if not file_field:
+        return
+
+    try:
+        # Try the standard Django way first
+        if hasattr(file_field, 'storage') and hasattr(file_field, 'name') and file_field.name:
+            if file_field.storage.exists(file_field.name):
+                file_field.delete(save=False)
+                logger.info(f"Deleted file via storage: {file_field.name}")
+            else:
+                logger.warning(f"File not found in storage: {file_field.name}")
+
+        # Also try to delete from filesystem directly as backup
+        if hasattr(file_field, 'path'):
+            try:
+                import os
+                if os.path.exists(file_field.path):
+                    os.remove(file_field.path)
+                    logger.info(f"Deleted file from filesystem: {file_field.path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete from filesystem: {str(e)}")
+
+    except Exception as e:
+        logger.warning(f"delete_file_field error: {str(e)}")
+
+
+def delete_message_media(message):
+    """Delete all media files associated with a message."""
+    if not message:
+        return
+
+    logger.info(f"Deleting media for message {message.id} (type: {message.message_type})")
+
+    media_fields = [
+        'audio_file',
+        'audio_file_english',
+        'audio_file_tamil',
+        'audio_file_hindi',
+        'audio_file_malayalam',
+        'audio_file_kannada'
+    ]
+
+    files_deleted = 0
+    for field_name in media_fields:
+        file_field = getattr(message, field_name, None)
+        if file_field:
+            logger.info(f"Deleting {field_name}: {file_field.name if hasattr(file_field, 'name') else 'no name'}")
+            delete_file_field(file_field)
+            files_deleted += 1
+
+    # Delete translation audio files
+    for translation in message.message_translations.all():
+        if translation.audio_file:
+            logger.info(f"Deleting translation audio for {translation.language}: {translation.audio_file.name}")
+            delete_file_field(translation.audio_file)
+            files_deleted += 1
+        try:
+            translation.delete()
+        except Exception as e:
+            logger.warning(f"delete_message_media translation delete error: {str(e)}")
+
+    logger.info(f"Deleted {files_deleted} media files for message {message.id}")
+
+
+def delete_group_and_media(group):
+    """Delete a group and all its associated media files."""
+    if not group:
+        logger.warning("delete_group_and_media: No group provided")
+        return
+
+    logger.info(f"Starting deletion of group '{group.code}' with {group.messages.count()} messages")
+
+    try:
+        # Delete all messages and their media
+        messages_deleted = 0
+        for message in list(group.messages.all()):
+            logger.info(f"Deleting message {message.id} with type {message.message_type}")
+            delete_message_media(message)
+            try:
+                message.delete()
+                messages_deleted += 1
+            except Exception as e:
+                logger.warning(f"delete_group_and_media message delete error: {str(e)}")
+
+        logger.info(f"Deleted {messages_deleted} messages for group '{group.code}'")
+
+        # Finally delete the group itself
+        group.delete()
+        logger.info(f"Successfully deleted group '{group.code}' and all associated data")
+
+    except Exception as e:
+        logger.error(f"delete_group_and_media error for group '{group.code}': {str(e)}")
 
 
 BRITISH_TO_US_ENGLISH = {
@@ -80,7 +197,7 @@ def check_and_cleanup_group(group):
             group.refresh_from_db()
             should_delete_again, _ = group.should_auto_delete()
             if should_delete_again and group.get_group_online_count() == 0:
-                group.delete()
+                delete_group_and_media(group)
                 return True, reason
         return False, reason
     except Exception as e:
@@ -562,6 +679,8 @@ def home(request):
 
 def chat(request):
     """Chat page - user enters their name and group code."""
+    group_code = request.GET.get('code', '')
+    
     if request.method == "POST":
         user_name = request.POST.get("user_name", "").strip()
         code = request.POST.get("code", "").strip()
@@ -631,7 +750,8 @@ def chat(request):
         active_languages = []
     
     context = {
-        'languages': active_languages
+        'languages': active_languages,
+        'group_code': group_code
     }
     return render(request, "chat.html", context)
 
@@ -652,7 +772,9 @@ def group_manage(request):
 
     # 🕒 Auto Expiry Logic: Delete groups older than 3 hours
     expiry_limit = timezone.now() - timedelta(hours=3)
-    Group.objects.filter(created_at__lt=expiry_limit).delete()
+    expired_groups = Group.objects.filter(created_at__lt=expiry_limit)
+    for expired_group in expired_groups:
+        delete_group_and_media(expired_group)
 
     error = None
     if request.method == "POST":
@@ -697,93 +819,95 @@ def group_manage(request):
 def delete_group_entirely(request, code):
     """Delete a group and all its data."""
     try:
-        Group.objects.filter(code=code).delete()
-    except Exception:
-        pass
+        group = Group.objects.filter(code=code).first()
+        if group:
+            delete_group_and_media(group)
+    except Exception as e:
+        logger.error(f"delete_group_entirely error: {str(e)}")
     return redirect("group_manage")
 
+
+@require_http_methods(["GET"])
+def group_info(request, code):
+    """Return basic metadata for a group code."""
+    group = Group.objects.filter(code=code).first()
+    if not group:
+        return JsonResponse({'error': 'Group not found'}, status=404)
+
+    return JsonResponse({
+        'code': group.code,
+        'name': group.name,
+        'group_url': request.build_absolute_uri(reverse('group', args=[group.code]))
+    })
+
+
 def group(request, code):
-    """Group chat view with language mode filtering."""
+    """
+    Optimized group chat view with:
+    - Message pagination (last 50 messages only)
+    - Lazy per-user translation (no all-language generation)
+    - Database query optimization (select_related)
+    - Cache-aware message loading
+    """
     try:
-        group = Group.objects.get(code=code)
+        # Optimized query: select_related for any foreign keys
+        group = Group.objects.select_related().get(code=code)
     except Group.DoesNotExist:
         return redirect('chat')
     
-    # REMOVED: check_and_cleanup_group() - now handled by background cron job
-    # This prevents expensive operations during user requests
-    
     user_name = request.session.get('user_name', 'Anonymous')
-    user_language = request.session.get('language', 'English')
     user_language_mode = request.session.get('language_mode', 'english').lower()
     session_id = ensure_session(request)
     
-    # Ensure user is a member of the group
+    # Ensure user is a member
     GroupMember.objects.get_or_create(
         group=group,
         session_id=session_id,
         defaults={'last_seen': timezone.now()}
     )
     
-    # Get messages from database
-    raw_messages = Message.objects.filter(group=group).order_by('timestamp')
+    # 📊 OPTIMIZATION 1: Pagination - Load last 50 messages only (not all)
+    MESSAGE_PAGE_SIZE = 50
     
-    # MULTILINGUAL WORKFLOW:
-    # 1. Messages are stored as canonical English in database
-    # 2. Each user sees the message translated to THEIR selected language
-    # 3. This ensures consistency: all users see the same message, just in different languages
+    # Get total count for pagination (text messages plus voice messages for this language)
+    total_messages = group.messages.filter(
+        Q(message_type='text') | Q(message_type='voice', translated_language=user_language_mode)
+    ).count()
     
+    # Optimized query: select_related for group (already done above)
+    all_messages = group.messages.filter(
+        Q(message_type='text') | Q(message_type='voice', translated_language=user_language_mode)
+    ).select_related('group').order_by('timestamp')[max(0, total_messages - MESSAGE_PAGE_SIZE):]
+    
+    # 📊 OPTIMIZATION 2: Translate text messages on the fly for the user's language
+    from chatapp.utils.translator import get_user_translation
+
     messages_list = []
-    for msg in raw_messages:
-        # Get the canonical English version (base for all translations)
-        english_version = ensure_us_english(msg.english_content or msg.normalized_content or msg.content) if msg.content else ""
-        
-        # TRANSLATE TO USER'S LANGUAGE MODE
-        display_content = english_version
-        
-        if user_language_mode == 'english':
-            # English mode: Display canonical English
-            display_content = ensure_english_only_display(english_version) if english_version else english_version
-        
-        elif user_language_mode == 'tamil':
-            # Tamil mode: Translate English → Tamil
-            # First try cached tamil_content for backward compatibility
-            if msg.tamil_content:
-                display_content = ensure_tamil_only_display(msg.tamil_content)
+    for msg in all_messages:
+        if msg.message_type == 'text':
+            english_version = msg.english_content or msg.normalized_content or msg.content or ""
+            if user_language_mode == 'english':
+                display_content = ensure_english_only_display(english_version) if english_version else ""
             else:
-                # Translate on-the-fly
-                try:
-                    success, tamil_text, _ = translate_text(english_version, 'Tamil')
-                    display_content = tamil_text if success else english_version
-                except:
-                    display_content = english_version
-        
+                success, translated, _ = get_user_translation(msg.id, english_version, user_language_mode, skip_cache=False)
+                display_content = translated if success and translated else english_version
         else:
-            # OTHER LANGUAGES (Hindi, Telugu, Malayalam, Kannada, Bengali, Gujarati, Marathi, Punjabi, Urdu)
-            # 🔴 CRITICAL FIX: Use translate_message_for_user to ensure source_language='English' is passed
-            # This ensures proper translation FROM English TO target language (e.g., English→Malayalam)
-            from chatapp.utils.language import translate_message_for_user
-            
-            try:
-                display_content = translate_message_for_user(english_version, user_language_mode)
-            except Exception as e:
-                logger.warning(f"Translation to {user_language_mode} failed: {e}")
-                display_content = english_version
-        
-        # Prepare message object for template
+            display_content = msg.content or ""
+
+        # Build message dict for template
         msg_data = {
             'id': msg.id,
             'user_name': msg.user_name,
-            'content': display_content,  # User's language translation (legacy key)
-            'display_content': display_content,  # Explicit translated text for template
+            'content': display_content,
+            'display_content': display_content,
             'original_content': msg.content,
-            'english_content': english_version,
+            'english_content': msg.english_content or "",
             'message_type': msg.message_type,
             'timestamp': msg.timestamp,
             'session_id': msg.session_id,
             'is_deleted': msg.is_deleted,
             'audio_file': msg.audio_file,
-            'audio_file_tamil': msg.audio_file_tamil,
-            'audio_file_english': msg.audio_file_english,
+            'audio_url': msg.audio_file.url if msg.audio_file else None,
             'audio_mime_type': msg.audio_mime_type or 'audio/webm',
             'duration': msg.duration
         }
@@ -792,12 +916,11 @@ def group(request, code):
     # Get online users count
     online_users = AnonymousUser.objects.filter(
         last_seen__gte=timezone.now() - timedelta(minutes=ONLINE_TIMEOUT_MINUTES)
-    ).distinct()
+    ).distinct().count()
     
     last_message_timestamp = messages_list[-1]['timestamp'].isoformat() if messages_list else timezone.now().isoformat()
     
-    # Get the actual language name from database (with fallback mapping)
-    # Fallback language mapping for languages not yet in database
+    # Get language name
     fallback_language_map = {
         'tamil': 'Tamil',
         'english': 'English',
@@ -812,33 +935,26 @@ def group(request, code):
         'urdu': 'Urdu',
     }
     
-    # Start with fallback name based on language_mode
     language_name = fallback_language_map.get(user_language_mode.lower(), user_language_mode.capitalize())
     
     try:
-        # Try to get actual language name from database (case-insensitive match)
         lang_obj = Language.objects.filter(name__iexact=user_language_mode, is_active=True).first()
         if lang_obj:
             language_name = lang_obj.name
-        else:
-            # If not found in database, check if it's active in database with different case
-            lang_obj = Language.objects.filter(name__iexact=fallback_language_map.get(user_language_mode.lower(), ''), is_active=True).first()
-            if lang_obj:
-                language_name = lang_obj.name
     except Exception as e:
-        logger.warning(f"Error fetching language name for mode {user_language_mode}: {str(e)}")
-        # Use fallback name already set above
+        logger.warning(f"Error fetching language: {str(e)}")
     
     context = {
         "group": group,
         "messages": messages_list,
         "user_name": user_name,
-        "online_count": online_users.count(),
+        "online_count": online_users,
         "last_message_timestamp": last_message_timestamp,
-        "language": user_language,
-        "language_name": language_name,
         "language_mode": user_language_mode,
+        "language_name": language_name,
         "user_session_id": session_id,
+        "total_messages": total_messages,
+        "has_more_messages": total_messages > MESSAGE_PAGE_SIZE,
     }
     
     return render(request, "group.html", context)
@@ -848,6 +964,7 @@ def group(request, code):
 # ================================
 import os
 import tempfile
+import uuid
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
@@ -872,75 +989,319 @@ import google.generativeai as genai
 # 🔹 SPEECH TO TEXT
 # ================================
 def speech_to_text(audio_file_path, lang="en-IN"):
-    print(f"[MIC] STT: Processing file {audio_file_path} with language {lang}")
+
+    print("==================================================")
+    print(f"[MIC] STT STARTED")
+    print(f"[MIC] File: {audio_file_path}")
+    print(f"[MIC] Language: {lang}")
+    print("==================================================")
+
     recognizer = sr.Recognizer()
+
     wav_file_path = audio_file_path + ".wav"
 
     try:
-        print("[PROCESS] Converting audio to WAV format...")
-        audio = AudioSegment.from_file(audio_file_path)
-        print(f"[STATS] Audio loaded: {len(audio)}ms duration, {audio.frame_rate}Hz")
 
-        # Normalize audio for better recognition
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        audio = effects.normalize(audio)
-        audio.export(wav_file_path, format="wav")
-        print(f"[SUCCESS] WAV conversion complete ({audio.frame_rate}Hz, {audio.channels} channel)")
+        # =====================================================
+        # CHECK FILE EXISTS
+        # =====================================================
 
-        print("[AUDIO] Starting speech recognition...")
-        with sr.AudioFile(wav_file_path) as source:
-            print("[AUDIO] Adjusting for ambient noise...")
-            recognizer.energy_threshold = 100
-            recognizer.dynamic_energy_threshold = True
-            recognizer.pause_threshold = 0.5
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            print("[AUDIO] Recording audio data...")
-            audio_data = recognizer.record(source)
-            print(f"[STT] Audio data recorded, calling Google API with lang={lang}...")
+        if not os.path.exists(audio_file_path):
 
-            def try_recognize(locale):
-                try:
-                    result = recognizer.recognize_google(audio_data, language=locale, show_all=True)
-                    if isinstance(result, dict) and result.get('alternative'):
-                        text = result['alternative'][0].get('transcript', '').strip()
-                        if text:
-                            print(f"[SUCCESS] STT Success ({locale}): '{text}'")
-                            return text
-                    return None
-                except sr.UnknownValueError:
-                    print(f"[WARNING] No speech recognized with {locale}")
-                    return None
-                except sr.RequestError as e:
-                    print(f"[FAIL] STT Request failed for {locale}: {e}")
-                    return None
+            print("[ERROR] Audio file does not exist")
 
-            if lang == "en":
-                for candidate in ["en-US", "en-GB", "en-IN", "en"]:
-                    text = try_recognize(candidate)
-                    if text:
-                        return text
-                return ""
-
-            text = try_recognize(lang)
-            if text:
-                return text.strip()
             return ""
 
+        file_size = os.path.getsize(audio_file_path)
+
+        print(f"[INFO] File size: {file_size} bytes")
+
+        if file_size == 0:
+
+            print("[ERROR] Empty audio file")
+
+            return ""
+
+        # =====================================================
+        # CONVERT AUDIO TO WAV
+        # =====================================================
+
+        print("[PROCESS] Loading audio file...")
+
+        audio = AudioSegment.from_file(audio_file_path)
+
+        print(
+            f"[STATS] Original audio: "
+            f"{len(audio)}ms | "
+            f"{audio.frame_rate}Hz | "
+            f"{audio.channels} channels"
+        )
+
+        # =====================================================
+        # AUDIO PREPROCESSING
+        # =====================================================
+
+        print("[PROCESS] Optimizing audio for STT...")
+
+        # Normalize volume
+        audio = effects.normalize(audio)
+
+        # Mono channel
+        if audio.channels > 1:
+
+            audio = audio.set_channels(1)
+
+            print("[AUDIO] Converted to mono")
+
+        # Best sample rate for Google STT
+        audio = audio.set_frame_rate(16000)
+
+        print("[AUDIO] Sample rate set to 16000Hz")
+
+        # Dynamic compression
+        audio = effects.compress_dynamic_range(
+            audio,
+            threshold=-20.0,
+            ratio=4.0,
+            attack=5.0,
+            release=50.0
+        )
+
+        print("[AUDIO] Compression applied")
+
+        # =====================================================
+        # EXPORT WAV
+        # =====================================================
+
+        audio.export(
+            wav_file_path,
+            format="wav"
+        )
+
+        print(f"[SUCCESS] WAV exported: {wav_file_path}")
+
+        # =====================================================
+        # LOAD AUDIO FOR RECOGNITION
+        # =====================================================
+
+        print("[AUDIO] Opening WAV for recognition...")
+
+        with sr.AudioFile(wav_file_path) as source:
+
+            # Better noise handling
+            recognizer.energy_threshold = 300
+            recognizer.dynamic_energy_threshold = True
+            recognizer.pause_threshold = 0.8
+            recognizer.non_speaking_duration = 0.5
+
+            print("[AUDIO] Adjusting ambient noise...")
+
+            recognizer.adjust_for_ambient_noise(
+                source,
+                duration=1
+            )
+
+            print(
+                f"[AUDIO] Energy threshold: "
+                f"{recognizer.energy_threshold}"
+            )
+
+            print("[AUDIO] Recording audio data...")
+
+            audio_data = recognizer.record(source)
+
+            print(
+                f"[SUCCESS] Audio recorded "
+                f"({len(audio_data.frame_data)} bytes)"
+            )
+
+        # =====================================================
+        # RECOGNITION FUNCTION
+        # =====================================================
+
+        def try_recognize(locale):
+
+            try:
+
+                print(f"[STT] Trying locale: {locale}")
+
+                result = recognizer.recognize_google(
+                    audio_data,
+                    language=locale,
+                    show_all=True
+                )
+
+                print(f"[DEBUG] Raw Google Result: {result}")
+
+                if not result:
+
+                    print(f"[WARNING] Empty result for {locale}")
+
+                    return None
+
+                if isinstance(result, dict):
+
+                    alternatives = result.get("alternative", [])
+
+                    if alternatives:
+
+                        best_result = alternatives[0]
+
+                        text = best_result.get(
+                            "transcript",
+                            ""
+                        ).strip()
+
+                        confidence = best_result.get(
+                            "confidence",
+                            0
+                        )
+
+                        if text:
+
+                            print(
+                                f"[SUCCESS] "
+                                f"Recognized with {locale}"
+                            )
+
+                            print(f"[TEXT] {text}")
+
+                            print(
+                                f"[CONFIDENCE] "
+                                f"{confidence}"
+                            )
+
+                            return text
+
+                elif isinstance(result, str):
+
+                    text = result.strip()
+
+                    if text:
+
+                        print(
+                            f"[SUCCESS] "
+                            f"Recognized string result"
+                        )
+
+                        print(f"[TEXT] {text}")
+
+                        return text
+
+                return None
+
+            except sr.UnknownValueError:
+
+                print(
+                    f"[WARNING] "
+                    f"No speech recognized with {locale}"
+                )
+
+                return None
+
+            except sr.RequestError as e:
+
+                print(
+                    f"[FAIL] Google API error "
+                    f"for {locale}: {str(e)}"
+                )
+
+                return None
+
+            except Exception as e:
+
+                print(
+                    f"[ERROR] Locale error "
+                    f"for {locale}: {str(e)}"
+                )
+
+                return None
+
+        # =====================================================
+        # LOCALE FALLBACKS
+        # =====================================================
+
+        fallback_locales = STT_LOCALE_FALLBACKS.get(
+            lang,
+            [lang]
+        )
+
+        # Add English fallback
+        if "en-IN" not in fallback_locales:
+
+            fallback_locales.append("en-IN")
+
+        print(f"[STT] Fallback locales: {fallback_locales}")
+
+        # =====================================================
+        # TRY ALL LOCALES
+        # =====================================================
+
+        for locale in fallback_locales:
+
+            recognized_text = try_recognize(locale)
+
+            if recognized_text:
+
+                print("==================================================")
+                print("[STT SUCCESS] speech_to_text COMPLETED")
+                print("==================================================")
+
+                return recognized_text.strip()
+
+        # =====================================================
+        # FINAL FAILURE
+        # =====================================================
+
+        print(
+            f"[FAIL] STT failed for all locales: "
+            f"{fallback_locales}"
+        )
+
+        return ""
+
     except sr.UnknownValueError:
-        print("[FAIL] STT Error: Speech not recognized (UnknownValueError)")
+
+        print("[FAIL] Speech not recognized")
+
         return ""
+
     except sr.RequestError as e:
-        print(f"[FAIL] STT Error: API request failed: {e}")
+
+        print(f"[FAIL] Google request failed: {str(e)}")
+
         return ""
+
     except Exception as e:
-        print(f"[FAIL] STT Error: Unexpected error: {e}")
+
+        print(f"[FAIL] Unexpected STT error: {str(e)}")
+
         return ""
 
     finally:
-        if os.path.exists(wav_file_path):
-            os.remove(wav_file_path)
-            print("[CLEAN] Cleaned up WAV file")
 
+        # =====================================================
+        # CLEANUP WAV
+        # =====================================================
+
+        try:
+
+            if os.path.exists(wav_file_path):
+
+                os.remove(wav_file_path)
+
+                print("[CLEANUP] WAV file removed")
+
+        except Exception as cleanup_error:
+
+            print(
+                f"[CLEANUP ERROR] "
+                f"{str(cleanup_error)}"
+            )
+
+        print("==================================================")
+        print("[MIC] STT END")
+        print("==================================================")
 # ================================
 # 🔹 GEMINI TRANSLATION
 # ================================
@@ -967,105 +1328,626 @@ def translate_with_gemini(tamil_text):
 
 
 # ================================
+# 🔹 MULTI-LANGUAGE SUPPORT MAPS
+# ================================
+LANGUAGE_MODE_TO_STT_LOCALE = {
+    'english': 'en',
+    'tamil': 'ta-IN',
+    'hindi': 'hi-IN',
+    'telugu': 'te-IN',
+    'malayalam': 'ml-IN',
+    'kannada': 'kn-IN',
+    'bengali': 'bn-IN',
+    'gujarati': 'gu-IN',
+    'marathi': 'mr-IN',
+    'punjabi': 'pa-IN',
+    'urdu': 'ur-IN',
+}
+
+# ================================
+# 🔹 SAFE REUSABLE TTS FUNCTION
+# ================================
+def create_tts_audio(text, language_code, media_root):
+    """
+    Create MP3 audio file from text using gTTS.
+    
+    Args:
+        text: Text to convert to speech
+        language_code: Language code (en, hi, ta, ml, etc.)
+        media_root: Path to media directory
+        
+    Returns:
+        filename if successful, None if failed
+    """
+    import os
+    import uuid
+    from gtts import gTTS
+    
+    try:
+        print("=" * 50)
+        print("[TTS] START")
+        print(f"[TEXT] {text}")
+        print(f"[LANG] {language_code}")
+
+        if not text or not text.strip():
+            print("[FAIL] Empty text")
+            return None
+
+        filename = f"{uuid.uuid4()}.mp3"
+        output_path = os.path.join(media_root, filename)
+        
+        print(f"[PATH] {output_path}")
+
+        tts = gTTS(
+            text=text,
+            lang=language_code,
+            slow=False
+        )
+
+        tts.save(output_path)
+
+        # Verify file was created
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
+            print(f"[SUCCESS] Audio saved: {output_path}")
+            print(f"[SIZE] {file_size} bytes")
+            return filename
+        else:
+            print("[FAIL] MP3 file not created after save")
+            return None
+
+    except Exception as e:
+        print("[TTS ERROR]")
+        print(f"[ERROR] {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+# Fallback STT locales for better recognition
+STT_LOCALE_FALLBACKS = {
+    'en': ['en-US', 'en-GB', 'en-IN', 'en-AU', 'en-CA', 'en'],
+    'ta-IN': ['ta-IN', 'ta', 'en-IN'],  # Tamil with English fallback
+    'hi-IN': ['hi-IN', 'hi', 'en-IN'],  # Hindi with English fallback
+    'te-IN': ['te-IN', 'te', 'en-IN'],  # Telugu with English fallback
+    'ml-IN': ['ml-IN', 'ml', 'en-IN'],  # Malayalam with English fallback
+    'kn-IN': ['kn-IN', 'kn', 'en-IN'],  # Kannada with English fallback
+    'bn-IN': ['bn-IN', 'bn', 'en-IN'],  # Bengali with English fallback
+    'gu-IN': ['gu-IN', 'gu', 'en-IN'],  # Gujarati with English fallback
+    'mr-IN': ['mr-IN', 'mr', 'en-IN'],  # Marathi with English fallback
+    'pa-IN': ['pa-IN', 'pa', 'en-IN'],  # Punjabi with English fallback
+    'ur-IN': ['ur-IN', 'ur', 'en-IN'],  # Urdu with English fallback
+}
+
+LANGUAGE_MODE_TO_GTTS_CODE = {
+    'english': 'en',
+    'tamil': 'ta',
+    'hindi': 'hi',
+    'telugu': 'te',
+    'malayalam': 'ml',
+    'kannada': 'kn',
+    'bengali': 'bn',
+    'gujarati': 'gu',
+    'marathi': 'mr',
+    'punjabi': 'pa',
+    'urdu': 'ur',
+}
+
+LANGUAGE_MODE_TO_AUDIO_FIELD = {
+    'english': 'audio_file_english',
+    'tamil': 'audio_file_tamil',
+    'hindi': 'audio_file_hindi',
+    'malayalam': 'audio_file_malayalam',
+    'kannada': 'audio_file_kannada',
+}
+
+SUPPORTED_TTS_LANGUAGES = ['english', 'tamil', 'hindi', 'malayalam', 'kannada']
+
+LANGUAGE_NAME_FOR_TRANSLATION = {
+    'english': 'English',
+    'tamil': 'Tamil',
+    'hindi': 'Hindi',
+    'telugu': 'Telugu',
+    'malayalam': 'Malayalam',
+    'kannada': 'Kannada',
+    'bengali': 'Bengali',
+    'gujarati': 'Gujarati',
+    'marathi': 'Marathi',
+    'punjabi': 'Punjabi',
+    'urdu': 'Urdu',
+}
+
+
+# ================================
+# 🔹 DYNAMIC LANGUAGE DETECTION
+# ================================
+
+def get_active_languages_in_group(group):
+    """
+    Get set of active languages currently used by group members.
+    Only generates translations/audio for these languages.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db import models
+
+    # Get online users in last 5 minutes + recent active users
+    cutoff_time = timezone.now() - timedelta(minutes=ONLINE_TIMEOUT_MINUTES)
+
+    # Get language modes from active group members
+    active_languages = set(
+        AnonymousUser.objects.filter(
+            session_id__in=group.members.values_list('session_id', flat=True)
+        ).filter(
+            # Either online OR recently active
+            models.Q(last_seen__gte=cutoff_time) |
+            models.Q(is_online=True)
+        ).values_list('language_mode', flat=True).distinct()
+    )
+
+    # Always include English as fallback
+    active_languages.add('english')
+
+    # Normalize language names
+    normalized_languages = set()
+    for lang in active_languages:
+        if lang:
+            normalized = lang.lower().strip()
+            if normalized in LANGUAGE_MODE_TO_GTTS_CODE:
+                normalized_languages.add(normalized)
+
+    return normalized_languages
+
+
+def generate_audio_for_active_languages(message, source_text, english_text, active_languages):
+    """
+    Generate audio ONLY for active languages in the group.
+    Returns dict of language -> MessageTranslation objects.
+    """
+    from django.core.files.base import ContentFile
+    from chatapp.models import MessageTranslation
+
+    print(f"[AUDIO] Generating for active languages: {active_languages}")
+
+    translations_created = {}
+
+    # Always generate English audio if not already exists
+    if 'english' in active_languages and english_text:
+        try:
+            # Check if already exists
+            existing = MessageTranslation.objects.filter(
+                message=message,
+                language='english'
+            ).first()
+
+            if not existing:
+                success, audio_bytes, synth_msg = synthesize_speech_with_gtts(english_text, 'en')
+                if success and audio_bytes:
+                    translation = MessageTranslation.objects.create(
+                        message=message,
+                        language='english',
+                        translated_text=english_text,
+                        audio_mime_type='audio/mpeg'
+                    )
+                    audio_filename = f'voice_{message.id}_english.mp3'
+                    translation.audio_file.save(audio_filename, ContentFile(audio_bytes))
+                    translation.save()
+                    translations_created['english'] = translation
+                    print(f"[SUCCESS] English audio created for message {message.id}")
+                else:
+                    print(f"[FAIL] English audio generation failed: {synth_msg}")
+            else:
+                translations_created['english'] = existing
+                print(f"[SKIP] English audio already exists for message {message.id}")
+
+        except Exception as e:
+            print(f"[ERROR] English audio creation failed: {str(e)}")
+
+    # Generate audio for other active languages
+    for language in active_languages:
+        if language == 'english':
+            continue  # Already handled above
+
+        try:
+            # Check if already exists
+            existing = MessageTranslation.objects.filter(
+                message=message,
+                language=language
+            ).first()
+
+            if existing:
+                translations_created[language] = existing
+                print(f"[SKIP] {language} audio already exists for message {message.id}")
+                continue
+
+            # Get translation for this language
+            language_name = LANGUAGE_NAME_FOR_TRANSLATION.get(language, language.title())
+            success, translated_text, msg = translate_text(
+                english_text,
+                language_name,
+                source_language='English'
+            )
+
+            if not success or not translated_text:
+                print(f"[FAIL] Translation to {language} failed: {msg}")
+                continue
+
+            # Generate audio
+            lang_code = LANGUAGE_MODE_TO_GTTS_CODE.get(language, 'en')
+            success, audio_bytes, synth_msg = synthesize_speech_with_gtts(translated_text, lang_code)
+
+            if success and audio_bytes:
+                translation = MessageTranslation.objects.create(
+                    message=message,
+                    language=language,
+                    translated_text=translated_text,
+                    audio_mime_type='audio/mpeg'
+                )
+                audio_filename = f'voice_{message.id}_{language}.mp3'
+                translation.audio_file.save(audio_filename, ContentFile(audio_bytes))
+                translation.save()
+                translations_created[language] = translation
+                print(f"[SUCCESS] {language} audio created for message {message.id}")
+            else:
+                print(f"[FAIL] {language} audio generation failed: {synth_msg}")
+
+        except Exception as e:
+            print(f"[ERROR] {language} audio creation failed: {str(e)}")
+
+    return translations_created
+
+
+def ensure_message_translation_for_language(message, language):
+    """
+    Ensure a message has translation/audio for a specific language.
+    Generates it if it doesn't exist (lazy generation).
+    """
+    from chatapp.models import MessageTranslation
+    from django.core.files.base import ContentFile
+
+    # Check if already exists
+    existing = MessageTranslation.objects.filter(
+        message=message,
+        language=language
+    ).first()
+
+    if existing:
+        return existing
+
+    # Generate translation/audio for this language
+    english_text = message.english_content or message.normalized_content or message.content or ""
+
+    if not english_text:
+        print(f"[LAZY] No English text available for message {message.id}")
+        return None
+
+    try:
+        # Get translation
+        language_name = LANGUAGE_NAME_FOR_TRANSLATION.get(language, language.title())
+        success, translated_text, msg = translate_text(
+            english_text,
+            language_name,
+            source_language='English'
+        )
+
+        if not success or not translated_text:
+            print(f"[LAZY] Translation failed for {language}: {msg}")
+            return None
+
+        # Generate audio
+        lang_code = LANGUAGE_MODE_TO_GTTS_CODE.get(language, 'en')
+        success, audio_bytes, synth_msg = synthesize_speech_with_gtts(translated_text, lang_code)
+
+        if not success or not audio_bytes:
+            print(f"[LAZY] Audio generation failed for {language}: {synth_msg}")
+            return None
+
+        # Create MessageTranslation
+        translation = MessageTranslation.objects.create(
+            message=message,
+            language=language,
+            translated_text=translated_text,
+            audio_mime_type='audio/mpeg'
+        )
+        audio_filename = f'voice_{message.id}_{language}.mp3'
+        translation.audio_file.save(audio_filename, ContentFile(audio_bytes))
+        translation.save()
+
+        print(f"[LAZY] Generated {language} translation/audio for message {message.id}")
+        return translation
+
+    except Exception as e:
+        print(f"[LAZY] Error generating {language} for message {message.id}: {str(e)}")
+        return None
+
+
+# ================================
 # 🔹 TEXT → 2 AUDIO (Tamil + English)
 # ================================
-def text_to_voice_by_mode(tamil_text, english_text, language_mode):
+def text_to_voice_by_mode(source_text, english_text, language_mode):
     try:
         from django.conf import settings
         import uuid
+        import os
 
         filename = f"{uuid.uuid4()}.mp3"
         audio_path = os.path.join(settings.MEDIA_ROOT, filename)
 
-        # 🎯 Decide based on mode
-        if language_mode == "tamil":
-            text = tamil_text
-            lang = "ta"
-        else:
+        # =========================================
+        # LANGUAGE MAP
+        # =========================================
+        lang_map = {
+            "english": "en",
+            "tamil": "ta",
+            "hindi": "hi",
+            "telugu": "te",
+            "malayalam": "ml",
+            "kannada": "kn",
+            "bengali": "bn",
+            "gujarati": "gu",
+            "marathi": "mr",
+            "punjabi": "pa",
+            "urdu": "ur",
+        }
+
+        normalized_mode = language_mode.lower()
+
+        # =========================================
+        # SELECT TEXT + LANGUAGE
+        # =========================================
+
+        # English mode
+        if normalized_mode in ["english", "en"]:
+
             text = english_text
             lang = "en"
 
-        tts = gTTS(text=text, lang=lang, slow=False)
+        # Other language modes
+        else:
+
+            # Use source language voice
+            text = source_text
+
+            # Get correct gTTS language code
+            lang = lang_map.get(normalized_mode, "en")
+
+        print(f"[VOICE] Language Mode: {normalized_mode}")
+        print(f"[VOICE] gTTS Lang Code: {lang}")
+        print(f"[VOICE] Text: {text}")
+
+        # =========================================
+        # EMPTY TEXT CHECK
+        # =========================================
+        if not text or not text.strip():
+            print("[VOICE ERROR] Empty text")
+            return None, None
+
+        # =========================================
+        # GENERATE AUDIO
+        # =========================================
+        tts = gTTS(
+            text=text,
+            lang=lang,
+            slow=False
+        )
+
         tts.save(audio_path)
+
+        print(f"[VOICE SUCCESS] Audio saved: {audio_path}")
 
         audio_url = f"{settings.MEDIA_URL}{filename}"
 
         return audio_url, audio_path
 
     except Exception as e:
-        print("Voice error:", e)
+
+        print(f"[VOICE ERROR] {str(e)}")
+
         return None, None
+    
+# ================================
+# 🔹 GENERATE MULTILINGUAL AUDIO
+# ================================
+def generate_multilingual_audio(
+    source_text,
+    english_text,
+    translated_text,
+    source_language_mode,
+    target_language_mode
+):
 
+    import os
 
-def generate_bilingual_audio(tamil_text, english_text):
-    """Generate BOTH Tamil and English audio files for voice messages."""
-    print(f"[AUDIO] Generating bilingual audio for Tamil: '{tamil_text}' (len: {len(tamil_text) if tamil_text else 0}), English: '{english_text}' (len: {len(english_text) if english_text else 0})")
+    from django.conf import settings
+
+    print("=" * 60)
+    print("[AUDIO] MULTILINGUAL AUDIO GENERATION START")
+    print("=" * 60)
+
+    print(f"[SOURCE MODE] {source_language_mode}")
+    print(f"[TARGET MODE] {target_language_mode}")
 
     try:
-        from django.conf import settings
-        import uuid
 
-        audio_files = {}
+        # =========================================
+        # NORMALIZE LANGUAGE MODES
+        # =========================================
+        source_language_mode = (
+            source_language_mode or "english"
+        ).lower()
 
-        # Generate English audio
-        try:
-            print("[AUDIO] Generating English audio...")
-            if not english_text or not english_text.strip():
-                print("[WARNING] No English text provided, skipping English audio generation")
-                audio_files['english'] = None
-            else:
-                english_filename = f"{uuid.uuid4()}.mp3"
-                english_audio_path = os.path.join(settings.MEDIA_ROOT, english_filename)
+        target_language_mode = (
+            target_language_mode or "english"
+        ).lower()
 
-                tts_en = gTTS(text=english_text, lang="en", slow=False)
-                tts_en.save(english_audio_path)
-                print(f"[SUCCESS] English audio saved: {english_audio_path}")
+        # =========================================
+        # AUDIO RESULT HOLDER
+        # =========================================
+        audio_files = {
+            "english": None,
+            "tamil": None,
+            "hindi": None,
+            "malayalam": None,
+            "kannada": None,
+            "source": None,
+        }
 
-                audio_files['english'] = {
-                    'url': f"{settings.MEDIA_URL}{english_filename}",
-                    'path': english_audio_path,
-                    'filename': english_filename
+        # =========================================
+        # LANGUAGE CODE MAP
+        # =========================================
+        source_lang_code = LANGUAGE_MODE_TO_GTTS_CODE.get(
+            source_language_mode,
+            "en"
+        )
+
+        target_lang_code = LANGUAGE_MODE_TO_GTTS_CODE.get(
+            target_language_mode,
+            "en"
+        )
+
+        print(f"[SOURCE LANG CODE] {source_lang_code}")
+        print(f"[TARGET LANG CODE] {target_lang_code}")
+        print("-" * 60)
+
+        # =========================================
+        # ENGLISH AUDIO (always generate)
+        # =========================================
+        print("[AUDIO] Generating ENGLISH audio")
+        if english_text and english_text.strip():
+            filename = create_tts_audio(
+                text=english_text,
+                language_code="en",
+                media_root=settings.MEDIA_ROOT
+            )
+            if filename:
+                audio_files["english"] = {
+                    "filename": filename,
+                    "url": f"{settings.MEDIA_URL}{filename}",
+                    "path": os.path.join(settings.MEDIA_ROOT, filename)
                 }
-        except Exception as e:
-            print(f"[FAIL] Failed to generate English audio: {str(e)}")
-            audio_files['english'] = None
-
-        # Generate Tamil audio
-        try:
-            print("[AUDIO] Generating Tamil audio...")
-            if not tamil_text or not tamil_text.strip():
-                print("[WARNING] No Tamil text provided, skipping Tamil audio generation")
-                audio_files['tamil'] = None
+                print(f"[SUCCESS] English audio: {filename}")
             else:
-                tamil_filename = f"{uuid.uuid4()}.mp3"
-                tamil_audio_path = os.path.join(settings.MEDIA_ROOT, tamil_filename)
+                print("[FAIL] English audio generation failed")
+        else:
+            print("[SKIP] English text empty")
 
-                tts_ta = gTTS(text=tamil_text, lang="ta", slow=False)
-                tts_ta.save(tamil_audio_path)
-                print(f"[SUCCESS] Tamil audio saved: {tamil_audio_path}")
+        print("-" * 60)
 
-                audio_files['tamil'] = {
-                    'url': f"{settings.MEDIA_URL}{tamil_filename}",
-                    'path': tamil_audio_path,
-                    'filename': tamil_filename
+        # =========================================
+        # GENERATE ALL SUPPORTED LANGUAGE AUDIO
+        # =========================================
+        language_texts = {
+            'tamil': None,
+            'hindi': None,
+            'malayalam': None,
+            'kannada': None,
+        }
+
+        # If translated_text already represents the current target language,
+        # reuse it for that language to avoid an extra translation call.
+        if target_language_mode in language_texts and translated_text:
+            language_texts[target_language_mode] = translated_text
+
+        for lang_key in language_texts:
+            if language_texts[lang_key] is None:
+                language_name = LANGUAGE_NAME_FOR_TRANSLATION.get(lang_key, lang_key.title())
+                success, translation, _ = translate_text(
+                    english_text,
+                    language_name,
+                    source_language='English'
+                )
+                language_texts[lang_key] = translation if success and translation else english_text
+
+            print(f"[AUDIO] Generating {lang_key.upper()} audio")
+            if language_texts[lang_key] and language_texts[lang_key].strip():
+                filename = create_tts_audio(
+                    text=language_texts[lang_key],
+                    language_code=LANGUAGE_MODE_TO_GTTS_CODE.get(lang_key, 'en'),
+                    media_root=settings.MEDIA_ROOT
+                )
+                if filename:
+                    audio_files[lang_key] = {
+                        'filename': filename,
+                        'url': f"{settings.MEDIA_URL}{filename}",
+                        'path': os.path.join(settings.MEDIA_ROOT, filename)
+                    }
+                    print(f"[SUCCESS] {lang_key.title()} audio: {filename}")
+                else:
+                    print(f"[FAIL] {lang_key.title()} audio generation failed")
+            else:
+                print(f"[SKIP] {lang_key.title()} text empty")
+
+            print("-" * 60)
+
+        # =========================================
+        # SOURCE AUDIO (use source language code)
+        # =========================================
+        print(f"[AUDIO] Generating SOURCE audio in {source_language_mode}")
+        if source_text and source_text.strip():
+            filename = create_tts_audio(
+                text=source_text,
+                language_code=source_lang_code,
+                media_root=settings.MEDIA_ROOT
+            )
+            if filename:
+                audio_files["source"] = {
+                    "filename": filename,
+                    "url": f"{settings.MEDIA_URL}{filename}",
+                    "path": os.path.join(settings.MEDIA_ROOT, filename)
                 }
-        except Exception as e:
-            print(f"[FAIL] Failed to generate Tamil audio: {str(e)}")
-            audio_files['tamil'] = None
+                print(f"[SUCCESS] Source audio: {filename}")
+            else:
+                print(f"[FAIL] Source audio generation failed for {source_language_mode}")
+        else:
+            print("[SKIP] Source text empty")
 
-        print(f"[STATS] Audio generation complete: Tamil={audio_files['tamil'] is not None}, English={audio_files['english'] is not None}")
+        print("-" * 60)
+
+        # =========================================
+        # FINAL STATUS
+        # =========================================
+        print("=" * 60)
+        print("[AUDIO] GENERATION COMPLETE")
+        print("=" * 60)
+
+        print(
+            f"[RESULT] "
+            f"English={audio_files['english'] is not None} | "
+            f"Tamil={audio_files['tamil'] is not None} | "
+            f"Hindi={audio_files['hindi'] is not None} | "
+            f"Malayalam={audio_files['malayalam'] is not None} | "
+            f"Kannada={audio_files['kannada'] is not None} | "
+            f"Source={audio_files['source'] is not None}"
+        )
+
         return audio_files
 
     except Exception as e:
-        print(f"[FAIL] generate_bilingual_audio error: {str(e)}")
-        return {'english': None, 'tamil': None}
+        print("=" * 60)
+        print("[FAIL] generate_multilingual_audio ERROR")
+        print("=" * 60)
+        print(f"[ERROR] {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
+        return {
+            "english": None,
+            "translated": None,
+            "source": None
+        }
 # ================================
 # 🔹 MAIN API
 # ================================
 
 @require_http_methods(["POST"])
 def upload_voice_message(request, code):
+
+    import os
+    import uuid
+
+    from django.conf import settings
+    from django.http import JsonResponse
+    from django.core.files import File
+    from django.utils import timezone
 
     if 'audio' not in request.FILES:
         return JsonResponse({'error': 'Audio not received'}, status=400)
@@ -1076,10 +1958,13 @@ def upload_voice_message(request, code):
     if audio_file.size == 0:
         return JsonResponse({'error': 'Empty audio'}, status=400)
 
+    temp_path = None
+
     try:
-        # =========================================
-        # 💾 Save temp audio
-        # =========================================
+
+        # =====================================================
+        # SAVE TEMP AUDIO
+        # =====================================================
         file_name = f"{uuid.uuid4()}.webm"
         temp_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
@@ -1087,224 +1972,338 @@ def upload_voice_message(request, code):
             for chunk in audio_file.chunks():
                 destination.write(chunk)
 
-        print("[SUCCESS] Audio saved:", temp_path)
+        print(f"[SAVE] Temp audio saved: {temp_path}")
 
-        # =========================================
-        # [TARGET] GET MODE
-        # =========================================
+        # =====================================================
+        # SESSION + LANGUAGE
+        # =====================================================
         session_id = request.session.session_key
+
         if not session_id:
             request.session.create()
             session_id = request.session.session_key
 
-        language_mode = get_language_mode(request, session_id)
+        language_mode = request.session.get(
+            'language_mode',
+            'english'
+        ).lower()
 
-        # =========================================
-        # [AI] SPEECH -> TEXT (BASED ON MODE)
-        # =========================================
+        print(f"[LANGUAGE] Current mode: {language_mode}")
+
+        # =====================================================
+        # SPEECH TO TEXT
+        # =====================================================
+        stt_locale = LANGUAGE_MODE_TO_STT_LOCALE.get(
+            language_mode,
+            'en-IN'
+        )
+
+        print(f"[STT] Using locale: {stt_locale}")
+
+        source_text = speech_to_text(
+            temp_path,
+            lang=stt_locale
+        )
+
+        print(f"[STT RESULT] {source_text}")
+
+        # fallback transcript
+        if not source_text and transcript_text:
+            source_text = transcript_text
+            print("[FALLBACK] Using transcript text")
+
         stt_failed = False
 
-        if language_mode == "tamil":
-            print(f"🎤 Tamil mode: Processing audio with ta-IN")
-            tamil_text = speech_to_text(temp_path, lang="ta-IN")
-            print(f"📝 Tamil STT result: '{tamil_text}' (length: {len(tamil_text) if tamil_text else 0})")
+        if not source_text:
+            stt_failed = True
+            source_text = ""
+            english_text = ""
+            translated_text = ""
 
-            if not tamil_text and transcript_text:
-                print("⚠️ Tamil STT empty, using client-provided transcript fallback")
-                tamil_text = transcript_text
-
-            if not tamil_text:
-                print("❌ Tamil STT failed - saving voice-only message")
-                tamil_text = ""
-                english_text = ""
-                stt_failed = True
-            else:
-                print("🔄 Translating Tamil to English...")
-                english_text = translate_with_gemini(tamil_text)
-                print(f"📝 English translation: '{english_text}'")
+            print("[FAIL] STT completely failed")
 
         else:
-            print(f"🎤 English mode: Processing audio with en (general English)")
-            english_text = speech_to_text(temp_path, lang="en")
-            print(f"📝 English STT result: '{english_text}' (length: {len(english_text) if english_text else 0})")
 
-            if not english_text:
-                print("❌ English STT failed - trying with en-US...")
-                english_text = speech_to_text(temp_path, lang="en-US")
-                print(f"📝 English STT en-US result: '{english_text}' (length: {len(english_text) if english_text else 0})")
+            # =====================================================
+            # ENGLISH MODE
+            # =====================================================
+            if language_mode in ['english', 'en']:
 
-                if not english_text and transcript_text:
-                    print("⚠️ English STT empty, using client-provided transcript fallback")
-                    english_text = transcript_text
+                english_text = source_text
 
-                if not english_text:
-                    print("❌ English STT completely failed - saving voice-only message")
-                    english_text = ""
-                    tamil_text = ""
-                    stt_failed = True
+                success, translated_text, msg = translate_text(
+                    english_text,
+                    'Tamil',
+                    source_language='English'
+                )
 
-            if english_text:
-                print("🔄 Translating English to Tamil...")
-                try:
-                    success, tamil_text, translation_msg = translate_text(english_text, 'Tamil')
-                    print(f"📝 Tamil translation success: {success}, result: '{tamil_text}', msg: {translation_msg}")
-                    if not success:
-                        print("⚠️ Translation failed, using English text as fallback")
-                        tamil_text = english_text
-                except Exception as e:
-                    print(f"⚠️ Translation exception: {e}, using English text as fallback")
-                    tamil_text = english_text
+                if not success:
+                    translated_text = english_text
 
-        print("📝 Tamil:", tamil_text)
-        print("📝 English:", english_text)
+                print(f"[TRANSLATE] English -> Tamil")
+                print(translated_text)
 
-        # =========================================
-        # 🔊 GENERATE BILINGUAL AUDIO
-        # =========================================
-        audio_files = generate_bilingual_audio(tamil_text, english_text)
+            # =====================================================
+            # TAMIL MODE
+            # =====================================================
+            elif language_mode in ['tamil', 'ta']:
 
-        # =========================================
-        # 💾 SAVE MESSAGE
-        # =========================================
-        message_id = None
+                translated_text = source_text
 
-        try:
-            group = Group.objects.get(code=code)
-            user_name = request.session.get('user_name', 'Anonymous')
+                success, english_text, msg = translate_text(
+                    translated_text,
+                    'English',
+                    source_language='Tamil'
+                )
 
-            # Always use English as primary content
-            content = english_text
-            word_count = len(content.split())
+                if not success:
+                    english_text = translated_text
+
+                print(f"[TRANSLATE] Tamil -> English")
+                print(english_text)
+
+            # =====================================================
+            # OTHER LANGUAGES
+            # =====================================================
+            else:
+
+                source_language_name = LANGUAGE_NAME_FOR_TRANSLATION.get(
+                    language_mode,
+                    'English'
+                )
+
+                # Source -> English
+                success, english_text, msg = translate_text(
+                    source_text,
+                    'English',
+                    source_language=source_language_name
+                )
+
+                if not success:
+                    english_text = source_text
+
+                # English -> SAME LANGUAGE
+                success, translated_text, msg = translate_text(
+                    english_text,
+                    source_language_name,
+                    source_language='English'
+                )
+
+                if not success:
+                    translated_text = source_text
+
+                print(f"[TRANSLATE] {source_language_name} -> English")
+                print(english_text)
+
+                print(f"[TRANSLATE] English -> {source_language_name}")
+                print(translated_text)
+
+        # =====================================================
+        # GENERATE AUDIO
+        # =====================================================
+        target_language_mode = language_mode
+        if language_mode in ['english', 'en']:
+            # In English mode the translated text is always Tamil.
+            target_language_mode = 'tamil'
+            tamil_text = translated_text
+        else:
+            target_language_mode = language_mode
+            # Always preserve a clean Tamil translation for backward compatibility
+            success, tamil_text, _ = translate_text(
+                english_text,
+                'Tamil',
+                source_language='English'
+            )
+            if not success or not tamil_text:
+                tamil_text = english_text
+
+        # =====================================================
+        # DYNAMIC AUDIO GENERATION FOR ACTIVE LANGUAGES
+        # =====================================================
+        group = Group.objects.get(code=code)
+
+        # Get active languages in this group
+        active_languages = get_active_languages_in_group(group)
+        print(f"[ACTIVE LANGUAGES] {active_languages}")
+
+        # =====================================================
+        # CREATE MESSAGES FOR ALL ACTIVE LANGUAGES
+        # =====================================================
+        user_name = request.session.get('user_name', 'Anonymous')
+        created_messages = []
+
+        for lang in active_languages:
+            print(f"[MESSAGE] Creating message for language: {lang}")
+
+            # Get translation for this language
+            if lang == 'english':
+                content = english_text
+                translated_content = english_text
+                audio_content = english_text
+            elif lang == language_mode:
+                # User's original language
+                content = source_text
+                translated_content = translated_text if translated_text else source_text
+                audio_content = source_text
+            else:
+                # Translate to this language
+                lang_name = LANGUAGE_NAME_FOR_TRANSLATION.get(lang, lang.title())
+                success, lang_text, msg = translate_text(
+                    english_text,
+                    lang_name,
+                    source_language='English'
+                )
+                if success and lang_text:
+                    content = lang_text
+                    translated_content = lang_text
+                    audio_content = lang_text
+                else:
+                    content = english_text
+                    translated_content = english_text
+                    audio_content = english_text
+
+            word_count = len(content.split()) if content else 0
             estimated_duration = max(1, word_count / 2.5)
 
-            message_audio_mime_type = audio_file.content_type or 'audio/webm'
+            # Create message for this language
             message = Message.objects.create(
                 group=group,
                 content=content,
-                normalized_content=english_text,
+                normalized_content=english_text,  # Always store canonical English
                 english_content=english_text,
-                tamil_content=tamil_text,
                 message_type='voice',
                 duration=estimated_duration,
                 user_name=user_name,
                 session_id=session_id,
-                audio_mime_type=message_audio_mime_type
+                audio_mime_type='audio/mpeg',
+                translated_content=translated_content,
+                translated_language=lang
             )
 
-            # [SUCCESS] SAVE BILINGUAL AUDIO FILES
-            from django.core.files import File
-            print(f"[SAVE] Saving audio files: English={audio_files.get('english') is not None}, Tamil={audio_files.get('tamil') is not None}")
-            
-            # Save English audio
-            if audio_files.get('english') and audio_files['english']['path'] and os.path.exists(audio_files['english']['path']):
-                try:
-                    print(f"[SAVE] Saving English audio file: {audio_files['english']['path']}")
-                    with open(audio_files['english']['path'], 'rb') as f:
-                        message.audio_file_english.save(audio_files['english']['filename'], File(f))
-                    print("[SUCCESS] English audio saved to database")
-                except Exception as e:
-                    print(f"[FAIL] Failed to save English audio: {str(e)}")
-            
-            # Save Tamil audio
-            if audio_files.get('tamil') and audio_files['tamil']['path'] and os.path.exists(audio_files['tamil']['path']):
-                try:
-                    print(f"[SAVE] Saving Tamil audio file: {audio_files['tamil']['path']}")
-                    with open(audio_files['tamil']['path'], 'rb') as f:
-                        message.audio_file_tamil.save(audio_files['tamil']['filename'], File(f))
-                    print("[SUCCESS] Tamil audio saved to database")
-                except Exception as e:
-                    print(f"[FAIL] Failed to save Tamil audio: {str(e)}")
-            
-            # Set default audio_file to English version if available
-            primary_audio_saved_as_mp3 = False
-            if audio_files.get('english') and audio_files['english']['path']:
-                try:
-                    print(f"[SAVE] Setting default audio file to English: {audio_files['english']['path']}")
-                    with open(audio_files['english']['path'], 'rb') as f:
-                        message.audio_file.save(audio_files['english']['filename'], File(f))
-                    print("[SUCCESS] Default audio file set")
-                    primary_audio_saved_as_mp3 = True
-                except Exception as e:
-                    print(f"[FAIL] Failed to save default audio file: {str(e)}")
-            elif os.path.exists(temp_path):
-                try:
-                    print(f"[SAVE] Saving original uploaded voice file as fallback: {temp_path}")
-                    with open(temp_path, 'rb') as f:
-                        message.audio_file.save(os.path.basename(temp_path), File(f))
-                    print("[SUCCESS] Saved original voice file to database")
-                except Exception as e:
-                    print(f"[FAIL] Failed to save original voice file: {str(e)}")
+            # Generate audio for this language
+            lang_code = LANGUAGE_MODE_TO_GTTS_CODE.get(lang, 'en')
+            success, audio_bytes, synth_msg = synthesize_speech_with_gtts(audio_content, lang_code)
+
+            if success and audio_bytes:
+                from django.core.files.base import ContentFile
+                audio_filename = f'voice_{message.id}_{lang}.mp3'
+                message.audio_file.save(audio_filename, ContentFile(audio_bytes))
+                message.save()
+                print(f"[SUCCESS] Audio generated and saved for {lang}: {audio_filename}")
             else:
-                print("[WARNING] No audio file available to save for this message")
+                print(f"[FAIL] Audio generation failed for {lang}: {synth_msg}")
+                # Fallback to original audio if generation failed
+                if os.path.exists(temp_path):
+                    try:
+                        with open(temp_path, 'rb') as f:
+                            message.audio_file.save(
+                                os.path.basename(temp_path),
+                                File(f)
+                            )
+                        message.audio_mime_type = audio_file.content_type or 'audio/webm'
+                        print(f"[FALLBACK] Original voice saved for {lang}")
+                    except Exception as e:
+                        print(f"[ERROR] Failed to save fallback audio for {lang}: {str(e)}")
 
-            message.translated_content = english_text
-            message.translated_language = 'English'
-            if primary_audio_saved_as_mp3:
-                message.audio_mime_type = 'audio/mpeg'
-            else:
-                message.audio_mime_type = audio_file.content_type or 'audio/webm'
-            message.save(update_fields=['audio_file_english', 'audio_file_tamil', 'audio_file', 'translated_content', 'translated_language', 'audio_mime_type'])
+            created_messages.append(message)
+            print(f"[MESSAGE] Created ID: {message.id} for language: {lang}")
 
-            # Update user
-            anon_user, _ = AnonymousUser.objects.get_or_create(
-                session_id=session_id,
-                defaults={'user_name': user_name}
-            )
-            anon_user.last_seen = timezone.now()
-            anon_user.is_online = True
-            anon_user.save(update_fields=['last_seen', 'is_online'])
+        # Use the message for the user's language for the response
+        message = None
+        for msg in created_messages:
+            if msg.translated_language == language_mode:
+                message = msg
+                break
+        # Fallback to first message if user's language not found
+        if not message and created_messages:
+            message = created_messages[0]
 
-            group.last_activity = timezone.now()
-            group.save(update_fields=['last_activity'])
+        # =====================================================
+        # UPDATE USER STATUS
+        # =====================================================
+        anon_user, _ = AnonymousUser.objects.get_or_create(
+            session_id=session_id,
+            defaults={'user_name': user_name}
+        )
 
-            message_id = message.id
+        anon_user.last_seen = timezone.now()
+        anon_user.is_online = True
 
-        except Exception as save_error:
-            logger.error(f"Save error: {save_error}")
+        anon_user.save(
+            update_fields=['last_seen', 'is_online']
+        )
 
-        # =========================================
-        # 🧹 CLEANUP
-        # =========================================
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        group.last_activity = timezone.now()
 
-        # Clean up both audio files
-        if audio_files.get('english') and audio_files['english']['path'] and os.path.exists(audio_files['english']['path']):
-            try:
-                os.remove(audio_files['english']['path'])
-            except Exception as e:
-                logger.warning(f"Failed to cleanup English audio: {str(e)}")
+        group.save(
+            update_fields=['last_activity']
+        )
 
-        if audio_files.get('tamil') and audio_files['tamil']['path'] and os.path.exists(audio_files['tamil']['path']):
-            try:
-                os.remove(audio_files['tamil']['path'])
-            except Exception as e:
-                logger.warning(f"Failed to cleanup Tamil audio: {str(e)}")
+        # =====================================================
+        # DISPLAY CONTENT (for response)
+        # =====================================================
+        display_content = message.content if message else "🎤 Voice Message"
 
-        # =========================================
-        # ✅ RESPONSE
-        # =========================================
-        response = {
+        # =====================================================
+        # RESPONSE
+        # =====================================================
+        response_data = {
             'success': True,
-            'tamil_text': tamil_text,
-            'english_text': english_text,
-            'audio': message.audio_file.url if message.audio_file else (audio_files['english']['url'] if audio_files.get('english') else None),
-            'mode': language_mode
+            'message': {
+                'id': message.id,
+                'user_name': message.user_name,
+                'display_content': display_content,
+                'content': display_content,
+                'source_text': source_text,
+                'translated_text': message.translated_content,
+                'english_text': english_text,
+                'audio_url': message.audio_file.url if message.audio_file else None,
+                'message_type': 'voice',
+                'timestamp': message.timestamp.isoformat(),
+                'is_sender': True,
+                'duration': message.duration,
+                'audio_mime_type': message.audio_mime_type,
+                'language_mode': message.translated_language
+            }
         }
 
         if stt_failed:
-            response['note'] = 'speech_recognition_unavailable'
+            response_data['warning'] = (
+                "Speech recognition failed"
+            )
 
-        if message_id:
-            response['message_id'] = message_id
+        # =====================================================
+        # CLEANUP GENERATED AUDIO
+        # =====================================================
+        for key in ['english', 'tamil', 'hindi', 'malayalam', 'kannada', 'source']:
+            if (
+                audio_files.get(key)
+                and audio_files[key]['path']
+                and os.path.exists(audio_files[key]['path'])
+            ):
+                try:
+                    os.remove(audio_files[key]['path'])
+                except:
+                    pass
 
-        return JsonResponse(response)
+        # TEMP FILE CLEANUP
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        print("[SUCCESS] upload_voice_message completed")
+
+        return JsonResponse(response_data)
 
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
 
+        print(f"[ERROR] upload_voice_message: {str(e)}")
 
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
+        return JsonResponse({
+            'error': str(e)
+        }, status=500)
 
 @require_http_methods(["POST"])
 def delete_message(request, code):
@@ -1426,117 +2425,90 @@ def get_online_users(request, code):
 
 @require_http_methods(["GET"])
 def get_new_messages(request, code):
-    """Get new messages since last timestamp - translates to user's language mode in real-time."""
+    """
+    Optimized message polling with:
+    - Per-user lazy translation (only translate to user's language)
+    - Efficient caching (check cache before DB)
+    - Minimal database queries
+    """
     try:
         group = Group.objects.get(code=code)
         session_id = ensure_session(request)
         since_timestamp = request.GET.get('since', '')
         user_language_mode = get_language_mode(request, session_id)
         
-        # AUTHORIZATION CHECK: Must be group member
-        is_member = GroupMember.objects.filter(
-            group=group,
-            session_id=session_id
-        ).exists()
+        # Authorization check
+        is_member = GroupMember.objects.filter(group=group, session_id=session_id).exists()
         if not is_member:
-            return JsonResponse({'error': 'Unauthorized access to group'}, status=403)
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
         
-        # REMOVED: check_and_cleanup_group() - now handled by background cron job
-        # This prevents expensive operations during user requests
-        
-        # PAGINATION FIX: Limit messages to prevent memory explosion
-        base_query = Message.objects.filter(group=group)
+        # Optimized query with select_related
+        base_query = Message.objects.filter(
+            group=group,
+            translated_language=user_language_mode
+        ).select_related('group')
         
         if since_timestamp:
             try:
                 from django.utils.dateparse import parse_datetime
                 since_dt = parse_datetime(since_timestamp)
-                if since_dt:
-                    # Ensure timezone-aware comparison
-                    if timezone.is_naive(since_dt):
-                        since_dt = timezone.make_aware(since_dt)
+                if since_dt and not timezone.is_naive(since_dt):
                     base_query = base_query.filter(timestamp__gt=since_dt)
             except Exception as e:
-                logger.warning(f"Invalid since_timestamp format: {since_timestamp}, error: {e}")
-                # Continue without filtering
+                logger.warning(f"Invalid timestamp: {since_timestamp}")
         
+        # Load last 50 messages only
         messages_query = base_query.order_by('-timestamp')[:50]
-        messages_query = messages_query[::-1]  # Reverse to chronological order
+        messages_query = list(messages_query[::-1])  # Reverse to chronological
         
-        # PRELOAD DELETED MESSAGES: Prevent N+1 queries
-        deleted_message_ids = set(
-            DeletedMessage.objects.filter(
-                session_id=session_id
-            ).values_list('message_id', flat=True)
-        )
+        # Get all deleted message IDs for this user (single query)
+        deleted_ids = set(DeletedMessage.objects.filter(
+            session_id=session_id
+        ).values_list('message_id', flat=True))
         
-        messages_list = []
-        for msg_obj in messages_query:
-            # Skip deleted messages
-            if msg_obj.id in deleted_message_ids:
-                continue
+        # Use lazy translation for each message
+        from chatapp.utils.translator import get_user_translation
         
         messages_list = []
+        from chatapp.utils.translator import get_user_translation
+
         for msg_obj in messages_query:
-            # Check if deleted for this user
-            if DeletedMessage.objects.filter(message=msg_obj, session_id=session_id).exists():
+            if msg_obj.id in deleted_ids:
                 continue
             
             try:
-                # Get canonical English version
-                english_version = ensure_us_english(msg_obj.english_content or msg_obj.normalized_content or msg_obj.content)
-                
-                # TRANSLATE TO USER'S LANGUAGE MODE
-                display_content = english_version
-                
-                if user_language_mode == 'english':
-                    # English mode: Display canonical English
-                    display_content = ensure_english_only_display(english_version)
-                
-                elif user_language_mode == 'tamil':
-                    # Tamil mode: Translate English → Tamil
-                    if msg_obj.tamil_content:
-                        display_content = ensure_tamil_only_display(msg_obj.tamil_content)
+                if msg_obj.message_type == 'text':
+                    english_version = msg_obj.english_content or msg_obj.normalized_content or msg_obj.content or ""
+                    if user_language_mode == 'english':
+                        display_content = ensure_english_only_display(english_version) if english_version else ""
                     else:
-                        try:
-                            success, tamil_text, _ = translate_text(english_version, 'Tamil', source_language='English')
-                            display_content = tamil_text if success else english_version
-                        except:
-                            display_content = english_version
-                
+                        success, translated, _ = get_user_translation(msg_obj.id, english_version, user_language_mode, skip_cache=False)
+                        display_content = translated if success and translated else english_version
                 else:
-                    # OTHER LANGUAGES: Use translate_message_for_user with proper source_language parameter
-                    # 🔴 CRITICAL FIX: This ensures source_language='English' is passed for proper translation
-                    from chatapp.utils.language import translate_message_for_user
-                    
-                    try:
-                        display_content = translate_message_for_user(english_version, user_language_mode)
-                    except Exception as e:
-                        logger.exception(f"Translation to {user_language_mode} failed for message {msg_obj.id}: {e}")
-                        display_content = english_version
+                    display_content = msg_obj.content or ""
                 
-                message_obj = {
+                msg_data = {
                     'id': msg_obj.id,
                     'user_name': msg_obj.user_name,
-                    'content': display_content,  # Translated content for user's language
+                    'content': display_content,
                     'display_content': display_content,
-                    'english': english_version,
-                    'original_content': msg_obj.content,
+                    'english': msg_obj.english_content or "",
                     'message_type': msg_obj.message_type,
                     'timestamp': msg_obj.timestamp.isoformat(),
                     'is_sender': msg_obj.session_id == session_id,
-                    'is_deleted': False,  # Since we filtered out deleted ones
-                    'language_mode': user_language_mode,
+                    'is_deleted': False,
+                    'language_mode': msg_obj.translated_language,
                 }
                 
                 if msg_obj.message_type == 'voice':
-                    message_obj['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else ''
-                    message_obj['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/webm'
-                    message_obj['duration'] = msg_obj.duration
+                    # Audio is already attached to the message
+                    msg_data['audio_url'] = msg_obj.audio_file.url if msg_obj.audio_file else None
+                    msg_data['audio_mime_type'] = msg_obj.audio_mime_type or 'audio/mpeg'
+                    msg_data['duration'] = msg_obj.duration
                 
-                messages_list.append(message_obj)
-            except Exception as msg_error:
-                logger.error(f"Error processing message {msg_obj.id}: {msg_error}")
+                messages_list.append(msg_data)
+            except Exception as e:
+                logger.error(f"Error processing message {msg_obj.id}: {str(e)}")
                 continue
         
         online_count = group.get_group_online_count()
@@ -1890,14 +2862,19 @@ def synthesize_voice_message(request, code):
             group=group,
             content=text,
             normalized_content=text,
-            english_content=text if target_language.lower() == 'english' else text,
-            tamil_content=text if target_language.lower() == 'tamil' else text,
+            english_content='',
+            tamil_content='',
             message_type='voice',
             duration=estimated_duration,
             user_name=user_name,
             session_id=session_id,
             audio_mime_type='audio/mpeg'
         )
+
+        if target_language.lower() == 'english':
+            message.english_content = text
+        elif target_language.lower() == 'tamil':
+            message.tamil_content = text
         
         # Save the synthesized audio file
         audio_file_name = f'synthesized_{message.id}_{target_language.lower()}.mp3'
@@ -1905,7 +2882,7 @@ def synthesize_voice_message(request, code):
         
         message.translated_content = text
         message.translated_language = target_language
-        message.save(update_fields=['audio_file', 'translated_content', 'translated_language'])
+        message.save(update_fields=['audio_file', 'translated_content', 'translated_language', 'english_content', 'tamil_content'])
         
         group.last_activity = timezone.now()
         group.save(update_fields=['last_activity'])
@@ -1927,6 +2904,134 @@ def synthesize_voice_message(request, code):
         return JsonResponse({'error': f'Synthesis error: {str(e)}'}, status=400)
 
 
+
+
+@require_http_methods(["GET"])
+def get_translation_metrics(request):
+    """Get API usage metrics (admin only)."""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+    
+    try:
+        from chatapp.utils.translator import get_translation_metrics
+        metrics = get_translation_metrics()
+        return JsonResponse({'success': True, 'metrics': metrics})
+    except Exception as e:
+        logger.error(f"get_translation_metrics error: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+@require_http_methods(["GET"])
+def load_more_messages(request, code):
+    """Load older messages when user scrolls up (pagination)."""
+    try:
+        group = Group.objects.get(code=code)
+        session_id = ensure_session(request)
+        
+        # Authorization check
+        is_member = GroupMember.objects.filter(group=group, session_id=session_id).exists()
+        if not is_member:
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
+        
+        user_language_mode = get_language_mode(request, session_id)
+        offset = int(request.GET.get('offset', 0))  # Which batch to load
+        limit = int(request.GET.get('limit', 50))   # Messages per batch
+        
+        # Safety checks
+        offset = max(0, min(offset, 10000))  # Max offset
+        limit = max(1, min(limit, 100))      # Max 100 messages per request
+        
+        # Get total count
+        total_messages = group.messages.count()
+        
+        # Load older messages (skip the most recent ones already loaded)
+        older_messages = group.messages.select_related('group').order_by('timestamp')[
+            offset:offset + limit
+        ]
+        
+        # Get deleted IDs
+        deleted_ids = set(DeletedMessage.objects.filter(
+            session_id=session_id
+        ).values_list('message_id', flat=True))
+        
+        from chatapp.utils.translator import get_user_translation
+        
+        messages_list = []
+        for msg_obj in older_messages:
+            if msg_obj.id in deleted_ids:
+                continue
+            
+            try:
+                english_version = msg_obj.english_content or msg_obj.normalized_content or msg_obj.content or ""
+                
+                if user_language_mode == 'english':
+                    display_content = ensure_english_only_display(english_version) if english_version else ""
+                else:
+                    success, translated, _ = get_user_translation(msg_obj.id, english_version, user_language_mode, skip_cache=False)
+                    display_content = translated if success and translated else english_version
+                
+                msg_data = {
+                    'id': msg_obj.id,
+                    'user_name': msg_obj.user_name,
+                    'content': display_content,
+                    'message_type': msg_obj.message_type,
+                    'timestamp': msg_obj.timestamp.isoformat(),
+                    'is_sender': msg_obj.session_id == session_id,
+                    'duration': msg_obj.duration if msg_obj.message_type == 'voice' else 0,
+                }
+                
+                if msg_obj.message_type == 'voice':
+                    # Get audio for user's language from MessageTranslation
+                    from chatapp.models import MessageTranslation
+                    user_translation = MessageTranslation.objects.filter(
+                        message=msg_obj,
+                        language=user_language_mode
+                    ).first()
+
+                    if not user_translation:
+                        # Lazy generation: create translation/audio for this language
+                        user_translation = ensure_message_translation_for_language(msg_obj, user_language_mode)
+
+                    if user_translation and user_translation.audio_file:
+                        msg_data['audio_url'] = user_translation.audio_file.url
+                        msg_data['audio_mime_type'] = user_translation.audio_mime_type or 'audio/mpeg'
+                        print(f"[VOICE LOAD_MORE] Using {user_language_mode} audio for message {msg_obj.id}")
+                    elif user_language_mode != 'english':
+                        # Try English fallback
+                        english_translation = MessageTranslation.objects.filter(
+                            message=msg_obj,
+                            language='english'
+                        ).first()
+
+                        if not english_translation:
+                            english_translation = ensure_message_translation_for_language(msg_obj, 'english')
+
+                        if english_translation and english_translation.audio_file:
+                            msg_data['audio_url'] = english_translation.audio_file.url
+                            msg_data['audio_mime_type'] = english_translation.audio_mime_type or 'audio/mpeg'
+                            print(f"[VOICE LOAD_MORE] Using English fallback for message {msg_obj.id}")
+                        else:
+                            print(f"[VOICE LOAD_MORE] No audio for message {msg_obj.id}")
+                    else:
+                        print(f"[VOICE LOAD_MORE] No audio for message {msg_obj.id}")
+                
+                messages_list.append(msg_data)
+            except Exception as e:
+                logger.error(f"Error loading message {msg_obj.id}: {str(e)}")
+                continue
+        
+        return JsonResponse({
+            'success': True,
+            'messages': messages_list,
+            'offset': offset + limit,
+            'has_more': (offset + limit) < total_messages,
+            'total_messages': total_messages,
+        })
+    except Group.DoesNotExist:
+        return JsonResponse({'error': 'Group not found'}, status=404)
+    except Exception as e:
+        logger.error(f"load_more_messages error: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=400)
 
 
 from django.shortcuts import render, redirect

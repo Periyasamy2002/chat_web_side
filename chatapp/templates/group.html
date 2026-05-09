@@ -1,6 +1,4 @@
-{% extends 'base.html' %}
 
-{% block content %}
 
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -621,15 +619,8 @@
                                         {% if msg.duration %}{{ msg.duration|floatformat:0 }}s{% else %}0s{% endif %}
                                     </div>
                                     <audio style="display: none;">
-                                        {# For Tamil mode, try language-specific audio files #}
-                                        {% if language_mode == 'tamil' and msg.audio_file_tamil %}
-                                            <source src="{{ msg.audio_file_tamil.url }}" type="{{ msg.audio_mime_type }}">
-                                        {# For English mode, try language-specific audio files #}
-                                        {% elif language_mode == 'english' and msg.audio_file_english %}
-                                            <source src="{{ msg.audio_file_english.url }}" type="{{ msg.audio_mime_type }}">
-                                        {# For all other languages or fallback #}
-                                        {% elif msg.audio_file %}
-                                            <source src="{{ msg.audio_file.url }}" type="{{ msg.audio_mime_type }}">
+                                        {% if msg.audio_url %}
+                                            <source src="{{ msg.audio_url }}" type="{{ msg.audio_mime_type|default:'audio/mpeg' }}">
                                         {% endif %}
                                     </audio>
                                 </div>
@@ -654,7 +645,7 @@
                 <input type="text" name="message" id="messageInput" placeholder="Type a message..." autocomplete="off">
                 <small class="input-error" id="inputError"></small>
             </div>
-            <button type="button" class="send-btn" id="sendBtn">✈️</button>
+            <button type="button" class="send-btn" id="sendBtn">➤</button>
             <button type="button" class="mic-btn" id="micBtn" title="Click to start/stop recording">🎤</button>
         </form>
         <div class="recording-indicator" id="recordingIndicator">
@@ -851,7 +842,7 @@
                 document.getElementById('messageInput').value = '';
                 inputError.style.display = 'none';
                 scrollToBottom();
-                setTimeout(() => fetchMessages(), 100);
+                location.reload();
             } else if (data.error) {
                 inputError.textContent = `❌ ${data.error}`;
                 inputError.style.display = 'block';
@@ -893,7 +884,7 @@
                 }
                 
                 if (data.success && data.messages && data.messages.length > 0) {
-                    lastFetchTime = new Date();
+                    lastFetchTime = data.timestamp ? new Date(data.timestamp) : new Date();
                     location.reload();
                 }
             })
@@ -983,6 +974,46 @@
         const percentage = x / rect.width;
         audio.currentTime = percentage * audio.duration;
     }
+
+    // Initialize audio progress bars
+    document.addEventListener('DOMContentLoaded', function() {
+        // Add timeupdate listeners to all audio elements
+        document.querySelectorAll('audio').forEach(audio => {
+            const progressFill = audio.parentElement.querySelector('.progress-fill');
+            const progressBar = audio.parentElement.querySelector('.progress-bar');
+            
+            if (progressFill && progressBar) {
+                audio.addEventListener('timeupdate', function() {
+                    if (audio.duration) {
+                        const percentage = (audio.currentTime / audio.duration) * 100;
+                        progressFill.style.width = percentage + '%';
+                    }
+                });
+                
+                audio.addEventListener('ended', function() {
+                    const playBtn = audio.parentElement.querySelector('.play-btn');
+                    if (playBtn) {
+                        playBtn.textContent = '▶️';
+                    }
+                    progressFill.style.width = '0%';
+                });
+                
+                audio.addEventListener('pause', function() {
+                    const playBtn = audio.parentElement.querySelector('.play-btn');
+                    if (playBtn) {
+                        playBtn.textContent = '▶️';
+                    }
+                });
+                
+                audio.addEventListener('play', function() {
+                    const playBtn = audio.parentElement.querySelector('.play-btn');
+                    if (playBtn) {
+                        playBtn.textContent = '⏸️';
+                    }
+                });
+            }
+        });
+    });
 
     function showDeleteDialog() {
         document.getElementById('deleteDialog').classList.add('active');
@@ -1288,5 +1319,3 @@
         });
     })();
 </script>
-
-{% endblock %}
