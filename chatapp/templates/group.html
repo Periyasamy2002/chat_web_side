@@ -43,7 +43,6 @@
         background: var(--header-gradient);
         padding: 0.8rem 1.2rem;
         border-bottom: 2px solid rgba(102, 126, 234, 0.3);
-        backdrop-filter: blur(10px);
         flex-shrink: 0;
         height: 70px;
         display: flex;
@@ -291,7 +290,6 @@
         background: rgba(255, 255, 255, 0.1);
         padding: 0.8rem 1rem calc(0.8rem + var(--safe-area-bottom));
         border-top: 2px solid rgba(102, 126, 234, 0.3);
-        backdrop-filter: blur(10px);
         flex-shrink: 0;
         width: 100%;
         max-width: 100vw;
@@ -884,7 +882,7 @@
                 document.getElementById('messageInput').value = '';
                 inputError.style.display = 'none';
                 scrollToBottom();
-                location.reload();
+                updateMessages();
             } else if (data.error) {
                 inputError.textContent = `❌ ${data.error}`;
                 inputError.style.display = 'block';
@@ -927,7 +925,7 @@
                 
                 if (data.success && data.messages && data.messages.length > 0) {
                     lastFetchTime = data.timestamp ? new Date(data.timestamp) : new Date();
-                    location.reload();
+                    updateMessages();
                 }
             })
             .catch(err => {
@@ -1085,7 +1083,7 @@
                 return;
             }
             if (data.success) {
-                location.reload();
+                updateMessages();
             }
         })
         .catch(err => {
@@ -1094,6 +1092,23 @@
         });
         
         hideDeleteDialog();
+    }
+
+    function updateMessages() {
+        fetch(window.location.href)
+        .then(r => r.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const newMessages = doc.getElementById('messagesScroll').innerHTML;
+            document.getElementById('messagesScroll').innerHTML = newMessages;
+            scrollToBottom();
+            // Audio replay fix
+            document.querySelectorAll("audio").forEach(audio => {
+                audio.autoplay = false;
+            });
+        })
+        .catch(err => console.error('Update messages error:', err));
     }
 
     function copyMessage() {

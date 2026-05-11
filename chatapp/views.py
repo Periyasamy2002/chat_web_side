@@ -161,7 +161,13 @@ def delete_message_media(message):
         'audio_file_tamil',
         'audio_file_hindi',
         'audio_file_malayalam',
-        'audio_file_kannada'
+        'audio_file_kannada',
+        'audio_file_telugu',
+        'audio_file_bengali',
+        'audio_file_gujarati',
+        'audio_file_marathi',
+        'audio_file_punjabi',
+        'audio_file_urdu', 
     ]
 
     files_deleted = 0
@@ -1496,9 +1502,15 @@ LANGUAGE_MODE_TO_AUDIO_FIELD = {
     'hindi': 'audio_file_hindi',
     'malayalam': 'audio_file_malayalam',
     'kannada': 'audio_file_kannada',
+    'telugu': 'audio_file_telugu',
+    'bengali': 'audio_file_bengali',
+    'gujarati': 'audio_file_gujarati',
+    'marathi': 'audio_file_marathi',
+    'punjabi': 'audio_file_punjabi',
+    'urdu': 'audio_file_urdu',
 }
 
-SUPPORTED_TTS_LANGUAGES = ['english', 'tamil', 'hindi', 'malayalam', 'kannada']
+SUPPORTED_TTS_LANGUAGES = ['english', 'tamil', 'hindi', 'malayalam', 'kannada', 'telugu', 'bengali', 'gujarati', 'marathi', 'punjabi', 'urdu']
 
 LANGUAGE_NAME_FOR_TRANSLATION = {
     'english': 'English',
@@ -1846,6 +1858,7 @@ def generate_multilingual_audio(
             "hindi": None,
             "malayalam": None,
             "kannada": None,
+            "telugu": None,
             "source": None,
         }
 
@@ -1898,6 +1911,7 @@ def generate_multilingual_audio(
             'hindi': None,
             'malayalam': None,
             'kannada': None,
+            'telugu': None,
         }
 
         # If translated_text already represents the current target language,
@@ -2333,7 +2347,7 @@ def upload_voice_message(request, code):
         # =====================================================
         # CLEANUP GENERATED AUDIO
         # =====================================================
-        for key in ['english', 'tamil', 'hindi', 'malayalam', 'kannada', 'source']:
+        for key in ['english', 'tamil', 'hindi', 'malayalam', 'kannada', 'telugu', 'source']:
             if (
                 audio_files.get(key)
                 and audio_files[key]['path']

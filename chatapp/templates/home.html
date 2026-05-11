@@ -3,7 +3,6 @@
 {% block content %}
 
 <style>
-
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
 
 *{
@@ -19,7 +18,7 @@ body{
 }
 
 /* =========================
-   MAIN SECTION
+   HERO SECTION
 ========================= */
 
 .hero-section{
@@ -31,17 +30,15 @@ body{
     align-items:center;
     justify-content:center;
     padding:40px 20px;
-    box-sizing:border-box;
 }
 
 /* =========================
-   ANIMATED BACKGROUND
+   BACKGROUND
 ========================= */
 
 .gradient-bg{
     position:absolute;
-    width:100%;
-    height:100%;
+    inset:0;
     overflow:hidden;
     z-index:0;
 }
@@ -80,7 +77,7 @@ body{
 
 @keyframes move{
     from{
-        transform:translateY(0px) translateX(0px);
+        transform:translateY(0) translateX(0);
     }
     to{
         transform:translateY(-50px) translateX(50px);
@@ -88,7 +85,7 @@ body{
 }
 
 /* =========================
-   GLASS CARD
+   HERO CONTAINER
 ========================= */
 
 .hero-container{
@@ -132,19 +129,6 @@ body{
     color:#fff;
     backdrop-filter:blur(20px);
     margin-bottom:25px;
-    animation:pulse 2s infinite;
-}
-
-@keyframes pulse{
-    0%{
-        box-shadow:0 0 0 0 rgba(108,99,255,0.5);
-    }
-    70%{
-        box-shadow:0 0 0 20px rgba(108,99,255,0);
-    }
-    100%{
-        box-shadow:0 0 0 0 rgba(108,99,255,0);
-    }
 }
 
 .hero-content h1{
@@ -187,13 +171,11 @@ body{
     text-decoration:none;
     font-weight:600;
     transition:0.4s;
-    position:relative;
-    overflow:hidden;
     box-shadow:0 15px 40px rgba(108,99,255,0.4);
 }
 
 .main-btn:hover{
-    transform:translateY(-6px) scale(1.05);
+    transform:translateY(-6px);
     box-shadow:0 20px 50px rgba(108,99,255,0.6);
 }
 
@@ -214,7 +196,7 @@ body{
 }
 
 /* =========================
-   FLOATING STATS
+   STATS
 ========================= */
 
 .stats{
@@ -243,7 +225,7 @@ body{
 
 @keyframes floatCard{
     0%,100%{
-        transform:translateY(0px);
+        transform:translateY(0);
     }
     50%{
         transform:translateY(-12px);
@@ -262,7 +244,7 @@ body{
 }
 
 /* =========================
-   RIGHT SIDE IMAGE
+   RIGHT IMAGE
 ========================= */
 
 .hero-image{
@@ -296,27 +278,23 @@ body{
 
 @keyframes floatImage{
     0%,100%{
-        transform:translateY(0px);
+        transform:translateY(0);
     }
     50%{
         transform:translateY(-25px);
     }
 }
 
-/* Glow Border */
-
 .glow{
     position:absolute;
     width:650px;
     height:650px;
     border-radius:50%;
-    background:conic-gradient(
-        from 180deg,
-        #6c63ff,
-        #ff4ecd,
-        #00d4ff,
-        #6c63ff
-    );
+    background:conic-gradient(from 180deg,
+            #6c63ff,
+            #ff4ecd,
+            #00d4ff,
+            #6c63ff);
     animation:rotate 6s linear infinite;
     filter:blur(80px);
     opacity:0.6;
@@ -332,14 +310,19 @@ body{
 }
 
 /* =========================
-   FEATURE BOXES
+   FEATURES
 ========================= */
 
-.feature-section{
-    margin-top:70px;
+.features-wrapper{
+    width:100%;
+    max-width:1350px;
+    margin:0 auto;
+    padding:0 20px 80px;
     display:grid;
     grid-template-columns:repeat(3,1fr);
     gap:25px;
+    position:relative;
+    z-index:5;
 }
 
 .feature-box{
@@ -366,7 +349,7 @@ body{
 }
 
 .feature-box:hover{
-    transform:translateY(-15px);
+    transform:translateY(-12px);
     border-color:#6c63ff;
 }
 
@@ -400,6 +383,11 @@ body{
         font-size:3.2rem;
     }
 
+    .hero-content p{
+        margin-left:auto;
+        margin-right:auto;
+    }
+
     .hero-buttons{
         justify-content:center;
     }
@@ -408,111 +396,92 @@ body{
         justify-content:center;
     }
 
-    .feature-section{
-        grid-template-columns:1fr;
-    }
-
     .hero-image{
-        margin-top:40px;
+        margin-top:30px;
     }
 
+    .features-wrapper{
+        grid-template-columns:1fr;
+        max-width:650px;
+    }
+
+    .feature-box{
+        text-align:center;
+    }
 }
 
 @media(max-width:768px){
-    
-    .hero-section {
-        padding: 30px 15px;
+
+    .hero-section{
+        padding:30px 15px;
     }
-    
-    .hero-container {
-        gap: 40px;
+
+    .hero-content h1{
+        font-size:2.7rem;
     }
-    
-    .hero-content h1 {
-        font-size: 2.8rem;
+
+    .hero-content p{
+        font-size:0.95rem;
     }
-    
-    .hero-content p {
-        font-size: 0.95rem;
-    }
-    
-    .feature-box {
-        padding: 25px;
-    }
-    
-    .feature-box h3 {
-        font-size: 1.3rem;
+
+    .feature-box{
+        padding:25px;
     }
 }
 
 @media(max-width:600px){
 
-    .hero-section {
-        padding: 20px 12px;
+    .hero-section{
+        padding:20px 12px;
     }
 
     .hero-content h1{
         font-size:2rem;
-        line-height: 1.2;
-        margin-bottom: 15px;
+        line-height:1.2;
+        margin-bottom:15px;
     }
 
     .hero-content p{
         font-size:0.9rem;
-        margin-bottom: 25px;
+        margin-bottom:25px;
+    }
+
+    .hero-buttons{
+        flex-direction:column;
+        gap:12px;
     }
 
     .main-btn,
     .secondary-btn{
         width:100%;
         text-align:center;
-        padding: 15px 20px;
-        font-size: 0.95rem;
-    }
-    
-    .hero-buttons {
-        gap: 12px;
-        flex-direction: column;
+        padding:15px 20px;
     }
 
     .glow{
         width:300px;
         height:300px;
     }
-    
-    .stat-card {
-        padding: 15px 20px;
-        flex: 1 1 calc(50% - 12px);
-    }
-    
-    .stat-card h2 {
-        font-size: 22px;
-    }
-    
-    .stat-card p {
-        font-size: 12px;
-    }
-    
-    .feature-section {
-        margin-top: 40px;
-        gap: 15px;
-    }
-    
-    .feature-box {
-        padding: 20px;
-    }
-    
-    .feature-box h3 {
-        font-size: 1.1rem;
-    }
-    
-    .feature-icon {
-        font-size: 40px;
+
+    .stat-card{
+        flex:1 1 calc(50% - 12px);
     }
 
+    .feature-box{
+        padding:20px;
+    }
+
+    .feature-box h3{
+        font-size:1.1rem;
+    }
+
+    .feature-icon{
+        font-size:40px;
+    }
 }
-
 </style>
+
+<!-- HERO SECTION -->
 
 <div class="hero-section">
 
@@ -574,34 +543,6 @@ body{
 
             </div>
 
-            <div class="feature-section">
-
-                <div class="feature-box">
-                    <div class="feature-icon">⚡</div>
-                    <h3>Real-Time Chat</h3>
-                    <p>
-                        Instant messaging with blazing fast socket communication.
-                    </p>
-                </div>
-
-                <div class="feature-box">
-                    <div class="feature-icon">🎤</div>
-                    <h3>Voice Messages</h3>
-                    <p>
-                        Send and receive crystal clear voice notes instantly.
-                    </p>
-                </div>
-
-                <div class="feature-box">
-                    <div class="feature-icon">🌎</div>
-                    <h3>Live Translation</h3>
-                    <p>
-                        Translate messages automatically into any language.
-                    </p>
-                </div>
-
-            </div>
-
         </div>
 
         <!-- RIGHT -->
@@ -610,8 +551,12 @@ body{
 
             <div class="glow"></div>
 
-            <img src="https://images.unsplash.com/photo-1611746872915-64382b5c76da?q=80&w=1400&auto=format&fit=crop"
-                 alt="Modern Chat App">
+            <img
+                src="https://images.unsplash.com/photo-1611746872915-64382b5c76da?q=80&w=800&auto=format&fit=crop"
+                alt="Modern Chat App"
+                width="400"
+                height="300"
+                loading="lazy">
 
         </div>
 
@@ -619,4 +564,36 @@ body{
 
 </div>
 
+<!-- FEATURES -->
+
+<div class="features-wrapper">
+
+    <div class="feature-box">
+        <div class="feature-icon">⚡</div>
+        <h3>Real-Time Chat</h3>
+        <p>
+            Instant messaging with blazing fast socket communication.
+        </p>
+    </div>
+
+    <div class="feature-box">
+        <div class="feature-icon">🎤</div>
+        <h3>Voice Messages</h3>
+        <p>
+            Send and receive crystal clear voice notes instantly.
+        </p>
+    </div>
+
+    <div class="feature-box">
+        <div class="feature-icon">🌎</div>
+        <h3>Live Translation</h3>
+        <p>
+            Translate messages automatically into any language.
+        </p>
+    </div>
+
+</div>
+
 {% endblock %}
+
+

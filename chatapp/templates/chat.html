@@ -12,13 +12,7 @@
         backdrop-filter: blur(10px);
         border: 1.5px solid rgba(102, 126, 234, 0.3);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        animation: slideInUp 0.6s ease-out;
         box-sizing: border-box;
-    }
-
-    @keyframes slideInUp {
-        from { opacity: 0; transform: translateY(30px); }
-        to { opacity: 1; transform: translateY(0); }
     }
 
     .chat-header {
@@ -228,11 +222,6 @@
             margin-top: 1.2rem;
             font-size: 0.85rem;
         }
-
-        .group-summary {
-            padding: 0.8rem;
-            font-size: 0.9rem;
-        }
     }
 
     @media (hover: none) and (pointer: coarse) {
@@ -317,56 +306,6 @@
 </div>
 
 <script>
-    const codeInput = document.getElementById('code');
-    const languageSelect = document.getElementById('language_mode');
-    const groupSummary = document.getElementById('groupSummary');
-    const summaryCode = document.getElementById('summaryCode');
-    const summaryName = document.getElementById('summaryName');
-    const summaryLanguage = document.getElementById('summaryLanguage');
-    let fetchTimeout = null;
-
-    function updateSummaryLanguage() {
-        const selected = languageSelect.options[languageSelect.selectedIndex];
-        summaryLanguage.textContent = selected ? selected.text : 'Not selected';
-    }
-
-    async function fetchGroupInfo(code) {
-        if (!code) {
-            groupSummary.style.display = 'none';
-            return;
-        }
-
-        try {
-            const response = await fetch(`/group-info/${encodeURIComponent(code)}/`);
-            if (!response.ok) {
-                groupSummary.style.display = 'none';
-                return;
-            }
-
-            const data = await response.json();
-            summaryCode.textContent = data.code;
-            summaryName.textContent = data.name;
-            updateSummaryLanguage();
-            groupSummary.style.display = 'block';
-        } catch (error) {
-            groupSummary.style.display = 'none';
-        }
-    }
-
-    codeInput.addEventListener('input', () => {
-        clearTimeout(fetchTimeout);
-        fetchTimeout = setTimeout(() => fetchGroupInfo(codeInput.value.trim()), 350);
-    });
-
-    languageSelect.addEventListener('change', () => {
-        updateSummaryLanguage();
-    });
-
-    // Auto-fetch info if code is pre-filled from share link
-    document.addEventListener('DOMContentLoaded', () => {
-        const initialCode = codeInput.value.trim();
-        if (initialCode) fetchGroupInfo(initialCode);
-    });
 </script>
 
 {% endblock %}

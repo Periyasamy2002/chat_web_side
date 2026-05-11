@@ -115,6 +115,12 @@ class Message(models.Model):
     audio_file_hindi = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Hindi version of voice message')
     audio_file_malayalam = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Malayalam version of voice message')
     audio_file_kannada = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Kannada version of voice message')
+    audio_file_telugu = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Telugu version of voice message')
+    audio_file_bengali = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Bengali version of voice message')
+    audio_file_gujarati = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Gujarati version of voice message')
+    audio_file_marathi = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Marathi version of voice message')
+    audio_file_punjabi = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Punjabi version of voice message')
+    audio_file_urdu = models.FileField(upload_to='voice_messages/', blank=True, null=True, help_text='Urdu version of voice message')
 
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     duration = models.FloatField(default=0)
