@@ -440,10 +440,11 @@
 
     .refresh-indicator {
         display: inline-block;
-        width: 16px;
-        height: 16px;
+        width: 20px; /* Increased size */
+        height: 20px; /* Increased size */
         margin-left: 0.5rem;
         animation: spin 1s linear infinite;
+        color: #ffeb3b; /* Bright yellow color for visibility */
         opacity: 0;
         transition: opacity 0.2s ease;
     }
@@ -957,12 +958,16 @@
 
     function createMessageElement(msg) {
         if (!msg || !msg.id) return null;
+        
+        // Fix: Robust check for deletion status to prevent "hidden/faded" look
+        const isDeleted = msg.is_deleted && msg.is_deleted !== 'not_deleted' && msg.is_deleted !== false;
+
         const messageGroup = document.createElement('div');
         messageGroup.className = `message-group ${msg.is_sender ? 'sender' : 'receiver'}`;
         messageGroup.dataset.messageId = msg.id;
 
         const bubble = document.createElement('div');
-        bubble.className = `message-bubble ${msg.is_sender ? 'sender' : 'receiver'}${msg.is_deleted !== 'not_deleted' ? ' deleted' : ''}`;
+        bubble.className = `message-bubble ${msg.is_sender ? 'sender' : 'receiver'}${isDeleted ? ' deleted' : ''}`;
         bubble.dataset.messageId = msg.id;
 
         if (!msg.is_sender) {
@@ -1036,10 +1041,10 @@
             audio.style.display = 'none';
             audio.preload = 'none';
             if (msg.audio_url) {
-                const source = document.createElement('source');
-                source.src = `${msg.audio_url}?_=${Date.now()}`;
-                source.type = msg.audio_mime_type || 'audio/mpeg';
-                audio.appendChild(source);
+                // Fix: Direct src assignment and cache busting for better reliability
+                const cacheBuster = msg.audio_url.includes('?') ? '&' : '?';
+                audio.src = `${msg.audio_url}${cacheBuster}_=${Date.now()}`;
+                audio.type = msg.audio_mime_type || 'audio/mpeg';
             }
             voiceDiv.appendChild(audio);
             bubble.appendChild(voiceDiv);
@@ -1096,6 +1101,7 @@
         const audio = messageNode.querySelector('audio');
         if (audio) {
             attachAudioEvents(audio);
+            audio.load(); // Fix: Force load metadata for new voice messages
         }
 
         if (shouldScroll) {
@@ -1153,7 +1159,7 @@
             refreshIndicator.classList.add('active');
         }
 
-        const url = `/group/${groupCode}/get-new-messages/?since=${encodeURIComponent(lastFetchTime.toISOString())}`;
+        const url = `/group/${groupCode}/get-messages/?since=${encodeURIComponent(lastFetchTime.toISOString())}`;
         fetch(url)
             .then(response => parseJSONSafely(response).then(data => ({ ok: response.ok, data })))
             .then(({ ok, data }) => {
@@ -1373,10 +1379,10 @@
         document.getElementById('contextMenu').classList.remove('active');
     });
 
-    // Auto-refresh chat every 1.5 seconds for FAST updates
+    // Auto-refresh chat every 800ms for realtime updates
     const refreshInterval = setInterval(() => {
         fetchMessages();
-    }, 1500);
+    }, 800);
 
     // Keep group online users list updated every 5 seconds
     const onlineUsersInterval = setInterval(() => {
@@ -1531,8 +1537,27 @@
                     inputError.style.display = 'block';
                     return;
                 }
-                // Success: clear any input error and refresh messages
+                // Success: append message immediately and update timestamps
                 inputError.style.display = 'none';
+                
+                if (data.message) {
+                    appendMessage({
+                        id: data.message.id,
+                        user_name: data.message.user_name,
+                        content: data.message.display_content || data.message.content || '🎤 Voice Message',
+                        display_content: data.message.display_content || data.message.content || '🎤 Voice Message',
+                        message_type: 'voice',
+                        timestamp: data.message.timestamp,
+                        is_sender: true,
+                        is_deleted: false,
+                        audio_url: data.message.audio_url,
+                        audio_mime_type: data.message.audio_mime_type,
+                        duration: data.message.duration
+                    });
+                    lastFetchTime = new Date();
+                    fetchOnlineUsers();
+                }
+                
                 scrollToBottom();
 
                 if (data.source_text) {
@@ -1540,8 +1565,6 @@
                     console.log('Translated English text:', data.english_text);
                     console.log('Translated Tamil text:', data.tamil_text);
                 }
-
-                setTimeout(() => fetchMessages(), 200);
 
                 if (transcriptText && transcriptText.trim()) {
                     const sourceText = transcriptText.trim();
@@ -1616,5 +1639,3 @@
         });
     })();
 </script>
-
-
