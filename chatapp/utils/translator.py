@@ -155,6 +155,16 @@ TANGLISH_PATTERNS = [
     r'\bappa\b', r'\bpa\b', r'\bka\b', r'\bvecha\b',
 ]
 
+TRANSLITERATION_CORRECTIONS = {
+    r'\bvanakka\b': 'vanakkam',
+    r'\bkataul\b': 'vanakkam',
+    r'\bnandri\b': 'nandri',
+    r'\beppadi irukeenga\b': 'eppadi irukeenga',
+    r'\bsaptingala\b': 'saptingala',
+    r'\bamma\b': 'amma',
+    r'\bappa\b': 'appa',
+}
+
 BRITISH_TO_US_ENGLISH = {
     'colour': 'color', 'favour': 'favor', 'honour': 'honor', 'labour': 'labor',
     'harbour': 'harbor', 'centre': 'center', 'metre': 'meter', 'theatre': 'theater',
@@ -364,6 +374,8 @@ def translate_text(
     source_language: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], str]:
     text = clean_text(text)
+    for pattern, replacement in TRANSLITERATION_CORRECTIONS.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     target_language = normalize_language_name(target_language)
     source_language = _source_language_for_translation(source_language, text)
 
@@ -429,6 +441,9 @@ def translate_text(
         if not translated:
             logger.warning('TRANSLATE_FAIL empty response from Gemini')
             return True, text, 'Empty translation from service - returning original'
+
+        for pattern, replacement in TRANSLITERATION_CORRECTIONS.items():
+            translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
 
         logger.info('TRANSLATE_SUCCESS target=%s length=%d', target_language, len(translated))
         result = (True, translated, 'Translation successful')

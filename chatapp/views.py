@@ -938,10 +938,11 @@ def group(request, code):
         Q(message_type='text') | Q(message_type='voice', translated_language=user_language_mode)
     ).count()
     
-    # Optimized query: select_related for group (already done above)
-    all_messages = group.messages.filter(
+    # Optimized query: load newest messages first then reverse for display
+    recent_messages = list(group.messages.filter(
         Q(message_type='text') | Q(message_type='voice', translated_language=user_language_mode)
-    ).select_related('group').order_by('timestamp')[max(0, total_messages - MESSAGE_PAGE_SIZE):]
+    ).select_related('group').order_by('-timestamp')[:MESSAGE_PAGE_SIZE])
+    all_messages = list(reversed(recent_messages))
     
     # 📊 OPTIMIZATION 2: Translate text messages on the fly for the user's language
     from chatapp.utils.translator import get_user_translation
@@ -977,10 +978,8 @@ def group(request, code):
         }
         messages_list.append(msg_data)
     
-    # Get online users count
-    online_users = AnonymousUser.objects.filter(
-        last_seen__gte=timezone.now() - timedelta(minutes=ONLINE_TIMEOUT_MINUTES)
-    ).distinct().count()
+    # Get online users count for this group only
+    online_users = group.get_group_online_count()
     
     last_message_timestamp = messages_list[-1]['timestamp'].isoformat() if messages_list else timezone.now().isoformat()
     
@@ -2031,6 +2030,7 @@ def upload_voice_message(request, code):
         return JsonResponse({'error': 'Empty audio'}, status=400)
 
     temp_path = None
+    audio_files = {}
 
     try:
 
@@ -2514,10 +2514,9 @@ def get_new_messages(request, code):
         if not is_member:
             return JsonResponse({'error': 'Unauthorized'}, status=403)
         
-        # Optimized query with select_related
-        base_query = Message.objects.filter(
-            group=group,
-            translated_language=user_language_mode
+        # Optimized query with select_related and correct text/voice filter
+        base_query = Message.objects.filter(group=group).filter(
+            Q(message_type='text') | Q(message_type='voice', translated_language=user_language_mode)
         ).select_related('group')
         
         if since_timestamp:
@@ -2542,7 +2541,6 @@ def get_new_messages(request, code):
         from chatapp.utils.translator import get_user_translation
         
         messages_list = []
-        from chatapp.utils.translator import get_user_translation
 
         for msg_obj in messages_query:
             if msg_obj.id in deleted_ids:
@@ -2695,7 +2693,8 @@ def send_message_ajax(request, code):
         else:
             # OTHER LANGUAGES: Translate English → User's language for display
             try:
-                translated_success, translated_text, _ = translate_text(english_version, SUPPORTED_LANGUAGES.get(user_language_mode, user_language_mode), source_language='English')
+                target_language_name = LANGUAGE_NAME_FOR_TRANSLATION.get(user_language_mode, user_language_mode.title())
+                translated_success, translated_text, _ = translate_text(english_version, target_language_name, source_language='English')
                 if translated_success and translated_text:
                     display_for_response = translated_text
                     # Apply script filtering for purity

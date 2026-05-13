@@ -122,13 +122,53 @@
         padding: 0.8rem 1rem;
         border-radius: 20px;
         word-wrap: break-word;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
         position: relative;
         font-size: var(--fs-msg);
         line-height: 1.5;
     }
 
-    .message-bubble.sender {
+    .online-users-bar {
+        padding: 0.45rem 1rem 0 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        min-height: 28px;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 0.82rem;
+    }
+
+    .online-users-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        align-items: center;
+        margin-top: 0.15rem;
+    }
+
+    .online-user-pill {
+        background: rgba(255, 255, 255, 0.18);
+        color: #fff;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    .messages-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
+    }
+
+    .messages-scroll::-webkit-scrollbar {
         background: var(--sender-bg);
         color: white;
         border-bottom-right-radius: 4px;
@@ -591,7 +631,7 @@
         <h2>💬 {{ group.code }} <span class="refresh-indicator" id="refreshIndicator">🔄</span></h2>
         <div class="header-info">
             <span>{{ user_name }}</span>
-            <span class="online-count">{{ online_count }} Online</span>
+            <span class="online-count" id="onlineCount">{{ online_count }} Online</span>
             {% if language_name == 'Tamil' %}
                 <span style="color: #ff9800; font-weight: 600;">🇮🇳 {{ language_name }} Mode</span>
             {% elif language_name == 'English' %}
@@ -618,6 +658,9 @@
                 <span style="color: #3498db; font-weight: 600;">🌍 {{ language_name }} Mode</span>
             {% endif %}
         </div>
+    </div>
+    <div class="online-users-bar" id="onlineUsersBar" aria-live="polite">
+        <div class="online-users-list" id="onlineUsersList"></div>
     </div>
 
     <!-- MESSAGES AREA -->
@@ -658,7 +701,7 @@
                                     <div class="voice-duration">
                                         {% if msg.duration %}{{ msg.duration|floatformat:0 }}s{% else %}0s{% endif %}
                                     </div>
-                                    <audio style="display: none;">
+                                    <audio style="display: none;" preload="none">
                                         {% if msg.audio_url %}
                                             <source src="{{ msg.audio_url }}" type="{{ msg.audio_mime_type|default:'audio/mpeg' }}">
                                         {% endif %}
@@ -848,6 +891,8 @@
                 sendBtn.click();
             }
         });
+
+        fetchOnlineUsers();
     });
 
     function parseJSONSafely(response) {
@@ -863,8 +908,6 @@
 
     function sendMessage(content) {
         const inputError = document.getElementById('inputError');
-        const sendBtn = document.getElementById('sendBtn');
-        
         fetch(`/group/${groupCode}/send-message/`, {
             method: 'POST',
             headers: {
@@ -878,11 +921,21 @@
             if (!ok) {
                 throw new Error(data.error || 'Failed to send message');
             }
-            if (data.success) {
+            if (data.success && data.message) {
                 document.getElementById('messageInput').value = '';
                 inputError.style.display = 'none';
-                scrollToBottom();
-                updateMessages();
+                appendMessage({
+                    id: data.message.id,
+                    user_name: data.message.user_name,
+                    content: data.message.content || data.message.display_content || '',
+                    display_content: data.message.display_content || data.message.content || '',
+                    message_type: 'text',
+                    timestamp: data.message.timestamp,
+                    is_sender: true,
+                    is_deleted: data.message.is_deleted || 'not_deleted'
+                });
+                lastFetchTime = new Date();
+                fetchOnlineUsers();
             } else if (data.error) {
                 inputError.textContent = `❌ ${data.error}`;
                 inputError.style.display = 'block';
@@ -895,38 +948,233 @@
         });
     }
 
+    function updateOnlineCount(count) {
+        const onlineCount = document.getElementById('onlineCount');
+        if (onlineCount) {
+            onlineCount.textContent = `${count} Online`;
+        }
+    }
+
+    function createMessageElement(msg) {
+        if (!msg || !msg.id) return null;
+        const messageGroup = document.createElement('div');
+        messageGroup.className = `message-group ${msg.is_sender ? 'sender' : 'receiver'}`;
+        messageGroup.dataset.messageId = msg.id;
+
+        const bubble = document.createElement('div');
+        bubble.className = `message-bubble ${msg.is_sender ? 'sender' : 'receiver'}${msg.is_deleted !== 'not_deleted' ? ' deleted' : ''}`;
+        bubble.dataset.messageId = msg.id;
+
+        if (!msg.is_sender) {
+            const header = document.createElement('div');
+            header.className = 'message-header';
+            header.textContent = msg.user_name || 'Anonymous';
+            bubble.appendChild(header);
+        }
+
+        if (msg.message_type === 'text') {
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            if (msg.is_deleted === 'deleted_for_all') {
+                const em = document.createElement('em');
+                em.textContent = 'This message was deleted';
+                contentDiv.appendChild(em);
+            } else {
+                contentDiv.textContent = msg.display_content || msg.content || '';
+            }
+            bubble.appendChild(contentDiv);
+
+            if (msg.is_deleted !== 'deleted_for_all') {
+                const translateBtn = document.createElement('button');
+                translateBtn.className = 'translate-btn';
+                translateBtn.type = 'button';
+                translateBtn.title = 'Translate message';
+                translateBtn.textContent = '🌐 Translate';
+                translateBtn.addEventListener('click', function(event) {
+                    translateMessage(event, msg.id, msg.content || '', this);
+                });
+                bubble.appendChild(translateBtn);
+
+                const translatedDiv = document.createElement('div');
+                translatedDiv.className = 'message-translated';
+                translatedDiv.id = `translated-${msg.id}`;
+                translatedDiv.style.display = 'none';
+                bubble.appendChild(translatedDiv);
+            }
+        } else if (msg.message_type === 'voice') {
+            const voiceDiv = document.createElement('div');
+            voiceDiv.className = 'voice-message';
+
+            const playBtn = document.createElement('button');
+            playBtn.className = 'play-btn';
+            playBtn.type = 'button';
+            playBtn.textContent = '▶️';
+            playBtn.addEventListener('click', function(event) {
+                togglePlayPause(event, this);
+            });
+            voiceDiv.appendChild(playBtn);
+
+            const progressWrap = document.createElement('div');
+            progressWrap.className = 'voice-progress';
+            const progressBar = document.createElement('div');
+            progressBar.className = 'progress-bar';
+            progressBar.addEventListener('click', function(event) {
+                seekAudio(event, this);
+            });
+            const progressFill = document.createElement('div');
+            progressFill.className = 'progress-fill';
+            progressBar.appendChild(progressFill);
+            progressWrap.appendChild(progressBar);
+            voiceDiv.appendChild(progressWrap);
+
+            const duration = document.createElement('div');
+            duration.className = 'voice-duration';
+            duration.textContent = msg.duration ? `${Math.round(msg.duration)}s` : '0s';
+            voiceDiv.appendChild(duration);
+
+            const audio = document.createElement('audio');
+            audio.style.display = 'none';
+            audio.preload = 'none';
+            if (msg.audio_url) {
+                const source = document.createElement('source');
+                source.src = `${msg.audio_url}?_=${Date.now()}`;
+                source.type = msg.audio_mime_type || 'audio/mpeg';
+                audio.appendChild(source);
+            }
+            voiceDiv.appendChild(audio);
+            bubble.appendChild(voiceDiv);
+        }
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'message-time';
+        timeSpan.textContent = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        bubble.appendChild(timeSpan);
+
+        messageGroup.appendChild(bubble);
+        return messageGroup;
+    }
+
+    function attachAudioEvents(audio) {
+        if (!audio) return;
+        const progressFill = audio.parentElement.querySelector('.progress-fill');
+        const playBtn = audio.parentElement.querySelector('.play-btn');
+
+        audio.addEventListener('timeupdate', function() {
+            if (audio.duration && progressFill) {
+                const percentage = (audio.currentTime / audio.duration) * 100;
+                progressFill.style.width = `${percentage}%`;
+            }
+        });
+
+        audio.addEventListener('ended', function() {
+            if (playBtn) playBtn.textContent = '▶️';
+            if (progressFill) progressFill.style.width = '0%';
+        });
+
+        audio.addEventListener('pause', function() {
+            if (playBtn) playBtn.textContent = '▶️';
+        });
+
+        audio.addEventListener('play', function() {
+            if (playBtn) playBtn.textContent = '⏸️';
+        });
+    }
+
+    function appendMessage(msg) {
+        const messagesScroll = document.getElementById('messagesScroll');
+        if (!messagesScroll || !msg || !msg.id) return;
+
+        if (document.querySelector(`.message-group[data-message-id="${msg.id}"]`)) {
+            return;
+        }
+
+        const shouldScroll = messagesScroll.scrollTop + messagesScroll.clientHeight >= messagesScroll.scrollHeight - 120;
+        const messageNode = createMessageElement(msg);
+        if (!messageNode) return;
+
+        messagesScroll.appendChild(messageNode);
+        const audio = messageNode.querySelector('audio');
+        if (audio) {
+            attachAudioEvents(audio);
+        }
+
+        if (shouldScroll) {
+            scrollToBottom();
+        }
+    }
+
+    function handleIncomingMessages(messages) {
+        if (!Array.isArray(messages) || !messages.length) return;
+        messages.forEach(msg => appendMessage(msg));
+    }
+
+    function updateOnlineUsersList(users) {
+        const listContainer = document.getElementById('onlineUsersList');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+
+        if (!Array.isArray(users) || users.length === 0) {
+            listContainer.textContent = 'No one else is online right now.';
+            return;
+        }
+
+        users.forEach(user => {
+            const pill = document.createElement('span');
+            pill.className = 'online-user-pill';
+            pill.textContent = user.display_name || 'Anonymous';
+            listContainer.appendChild(pill);
+        });
+    }
+
+    function fetchOnlineUsers() {
+        fetch(`/group/${groupCode}/online-users/`)
+            .then(response => parseJSONSafely(response).then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok || !data.success) {
+                    return;
+                }
+                updateOnlineCount(data.count || 0);
+                updateOnlineUsersList(data.users || []);
+            })
+            .catch(err => {
+                console.warn('Online users fetch failed', err);
+            });
+    }
+
     let lastFetchTime = new Date();
     let isRefreshing = false;
     
     function fetchMessages() {
         if (isRefreshing) return;
         isRefreshing = true;
-        
-        // Show refresh indicator
+
         const refreshIndicator = document.getElementById('refreshIndicator');
         if (refreshIndicator) {
             refreshIndicator.classList.add('active');
         }
-        
-        fetch(`/group/${groupCode}/get-messages/?since=${lastFetchTime.toISOString()}`)
+
+        const url = `/group/${groupCode}/get-new-messages/?since=${encodeURIComponent(lastFetchTime.toISOString())}`;
+        fetch(url)
             .then(response => parseJSONSafely(response).then(data => ({ ok: response.ok, data })))
             .then(({ ok, data }) => {
                 isRefreshing = false;
-                
-                // Hide refresh indicator
                 if (refreshIndicator) {
                     refreshIndicator.classList.remove('active');
                 }
-                
-                if (!ok) {
+                if (!ok || !data.success) {
                     console.error('Fetch error:', data);
                     return;
                 }
-                
-                if (data.success && data.messages && data.messages.length > 0) {
-                    lastFetchTime = data.timestamp ? new Date(data.timestamp) : new Date();
-                    updateMessages();
+
+                if (data.messages && data.messages.length > 0) {
+                    handleIncomingMessages(data.messages);
                 }
+
+                if (typeof data.online_count === 'number') {
+                    updateOnlineCount(data.online_count);
+                }
+
+                lastFetchTime = data.timestamp ? new Date(data.timestamp) : new Date();
             })
             .catch(err => {
                 isRefreshing = false;
@@ -1083,7 +1331,7 @@
                 return;
             }
             if (data.success) {
-                updateMessages();
+                fetchMessages();
             }
         })
         .catch(err => {
@@ -1095,20 +1343,7 @@
     }
 
     function updateMessages() {
-        fetch(window.location.href)
-        .then(r => r.text())
-        .then(html => {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const newMessages = doc.getElementById('messagesScroll').innerHTML;
-            document.getElementById('messagesScroll').innerHTML = newMessages;
-            scrollToBottom();
-            // Audio replay fix
-            document.querySelectorAll("audio").forEach(audio => {
-                audio.autoplay = false;
-            });
-        })
-        .catch(err => console.error('Update messages error:', err));
+        fetchMessages();
     }
 
     function copyMessage() {
@@ -1142,6 +1377,11 @@
     const refreshInterval = setInterval(() => {
         fetchMessages();
     }, 1500);
+
+    // Keep group online users list updated every 5 seconds
+    const onlineUsersInterval = setInterval(() => {
+        fetchOnlineUsers();
+    }, 5000);
 
     // Mic / voice recording: press-and-hold to record and upload
     (function() {
