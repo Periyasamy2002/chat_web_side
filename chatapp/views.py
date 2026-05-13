@@ -3105,109 +3105,109 @@ def load_more_messages(request, code):
         return JsonResponse({'error': str(e)}, status=400)
 
 
-# from django.shortcuts import render, redirect
-# from django.contrib.auth.models import User
-# from django.contrib import messages
-# from django.views.decorators.http import require_http_methods
+from django.shortcuts import render, redirect
+from django.contrib.auth.models import User
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
 
-# @require_http_methods(["GET", "POST"])
-# def admin_register_view(request):
-#     """Create new Django admin (superuser) with protection."""
-#     error = None
-#     success = None
-#     secret_key = os.getenv('ADMIN_SECRET_KEY', '')
+@require_http_methods(["GET", "POST"])
+def admin_register_view(request):
+    """Create new Django admin (superuser) with protection."""
+    error = None
+    success = None
+    secret_key = os.getenv('ADMIN_SECRET_KEY', '')
     
-#     # 🔥 SECURITY FIX: Use POST only for admin key
-#     provided_key = request.POST.get('admin_key', '') if request.method == 'POST' else ''
+    # 🔥 SECURITY FIX: Use POST only for admin key
+    provided_key = request.POST.get('admin_key', '') if request.method == 'POST' else ''
     
-#     # Count existing superusers
-#     superuser_count = User.objects.filter(is_superuser=True).count()
-#     can_register = True
+    # Count existing superusers
+    superuser_count = User.objects.filter(is_superuser=True).count()
+    can_register = True
     
-#     # If superuser exists, require secret key
-#     if superuser_count > 0 and secret_key:
-#         if provided_key != secret_key:
-#             can_register = False
-#             error = "❌ Invalid or missing admin registration key"
+    # If superuser exists, require secret key
+    if superuser_count > 0 and secret_key:
+        if provided_key != secret_key:
+            can_register = False
+            error = "❌ Invalid or missing admin registration key"
     
-#     # Check admin limit with transaction safety
-#     if superuser_count >= 3:
-#         return render(request, "admin_register.html", {
-#             "error": "❌ Admin limit reached (only 3 allowed)",
-#             "superuser_count": superuser_count
-#         })
+    # Check admin limit with transaction safety
+    if superuser_count >= 3:
+        return render(request, "admin_register.html", {
+            "error": "❌ Admin limit reached (only 3 allowed)",
+            "superuser_count": superuser_count
+        })
 
-#     if request.method == "POST":
-#         provided_key = request.POST.get('admin_key', '')
+    if request.method == "POST":
+        provided_key = request.POST.get('admin_key', '')
         
-#         # If superuser exists, require secret key
-#         if superuser_count > 0 and secret_key:
-#             if provided_key != secret_key:
-#                 can_register = False
-#                 error = "❌ Invalid or missing admin registration key"
+        # If superuser exists, require secret key
+        if superuser_count > 0 and secret_key:
+            if provided_key != secret_key:
+                can_register = False
+                error = "❌ Invalid or missing admin registration key"
 
-#         if not can_register:
-#             return render(request, "admin_register.html", {
-#                 "error": error,
-#                 "superuser_count": superuser_count
-#             })
+        if not can_register:
+            return render(request, "admin_register.html", {
+                "error": error,
+                "superuser_count": superuser_count
+            })
 
-#         username = request.POST.get("username", "").strip()
-#         email = request.POST.get("email", "").strip()
-#         password = request.POST.get("password", "").strip()
-#         password_confirm = request.POST.get("password_confirm", "").strip()
+        username = request.POST.get("username", "").strip()
+        email = request.POST.get("email", "").strip()
+        password = request.POST.get("password", "").strip()
+        password_confirm = request.POST.get("password_confirm", "").strip()
 
-#         # Validation
-#         if not username or not email or not password or not password_confirm:
-#             error = "⚠️ All fields are required"
-#         elif len(username) < 3:
-#             error = "⚠️ Username must be at least 3 characters"
-#         elif len(password) < 8:
-#             error = "⚠️ Password must be at least 8 characters"
-#         elif password != password_confirm:
-#             error = "⚠️ Passwords don't match"
-#         elif not email or '@' not in email:
-#             error = "⚠️ Valid email required"
-#         elif User.objects.filter(username=username).exists():
-#             error = "⚠️ Username already exists"
-#         elif User.objects.filter(email=email).exists():
-#             error = "⚠️ Email already exists"
-#         else:
-#             # RACE CONDITION FIX: Use transaction.atomic()
-#             from django.db import transaction
-#             try:
-#                 with transaction.atomic():
-#                     # Recheck count inside transaction
-#                     current_count = User.objects.filter(is_superuser=True).count()
-#                     if current_count >= 3:
-#                         raise ValueError("Admin limit reached during registration")
+        # Validation
+        if not username or not email or not password or not password_confirm:
+            error = "⚠️ All fields are required"
+        elif len(username) < 3:
+            error = "⚠️ Username must be at least 3 characters"
+        elif len(password) < 8:
+            error = "⚠️ Password must be at least 8 characters"
+        elif password != password_confirm:
+            error = "⚠️ Passwords don't match"
+        elif not email or '@' not in email:
+            error = "⚠️ Valid email required"
+        elif User.objects.filter(username=username).exists():
+            error = "⚠️ Username already exists"
+        elif User.objects.filter(email=email).exists():
+            error = "⚠️ Email already exists"
+        else:
+            # RACE CONDITION FIX: Use transaction.atomic()
+            from django.db import transaction
+            try:
+                with transaction.atomic():
+                    # Recheck count inside transaction
+                    current_count = User.objects.filter(is_superuser=True).count()
+                    if current_count >= 3:
+                        raise ValueError("Admin limit reached during registration")
                     
-#                     # ✅ Create Django superuser with proper password hashing
-#                     user = User.objects.create_superuser(
-#                         username=username,
-#                         email=email,
-#                         password=password
-#                     )
-#                     logger.info(f"[SUCCESS] New superuser created: {username} ({email})")
+                    # ✅ Create Django superuser with proper password hashing
+                    user = User.objects.create_superuser(
+                        username=username,
+                        email=email,
+                        password=password
+                    )
+                    logger.info(f"[SUCCESS] New superuser created: {username} ({email})")
                     
-#                     success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
-#                     messages.success(request, f"Admin account created! You can now login with username '{username}'")
+                    success = f"✅ Admin '{username}' registered successfully! Redirecting to login..."
+                    messages.success(request, f"Admin account created! You can now login with username '{username}'")
                     
-#                     # Redirect to login after 2 seconds (JS in template)
-#                     return render(request, "admin_register.html", {
-#                         "success": success,
-#                         "superuser_count": current_count + 1,
-#                         "redirect": True
-#                     })
-#             except ValueError as ve:
-#                 error = f"❌ {str(ve)}"
-#             except Exception as e:
-#                 logger.error(f"❌ Error creating admin: {str(e)}")
-#                 error = f"❌ Error creating admin: {str(e)}"
+                    # Redirect to login after 2 seconds (JS in template)
+                    return render(request, "admin_register.html", {
+                        "success": success,
+                        "superuser_count": current_count + 1,
+                        "redirect": True
+                    })
+            except ValueError as ve:
+                error = f"❌ {str(ve)}"
+            except Exception as e:
+                logger.error(f"❌ Error creating admin: {str(e)}")
+                error = f"❌ Error creating admin: {str(e)}"
             
-#     return render(request, "admin_register.html", {
-#         "error": error,
-#         "success": success,
-#         "superuser_count": superuser_count,
-#         "key_required": superuser_count > 0 and secret_key and not can_register
-#     }) 
+    return render(request, "admin_register.html", {
+        "error": error,
+        "success": success,
+        "superuser_count": superuser_count,
+        "key_required": superuser_count > 0 and secret_key and not can_register
+    }) 

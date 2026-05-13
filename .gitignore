@@ -7,6 +7,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Virtual environments
 env/
 venv/
 ENV/
@@ -16,6 +18,16 @@ ENV/
 db.sqlite3
 /media/
 /staticfiles/
+
+# Cache
+*.cache
+.pytest_cache/
+
+# Audio / uploads
+*.mp3
+*.wav
+*.webm
+*.ogg
 
 # IDE
 .vscode/
